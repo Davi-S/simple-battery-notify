@@ -1,10 +1,10 @@
 [Unit]
-Description=Sends automatic notifications about the battery status
+Description=Battery Notification D-Bus Listener
 After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/auto-battery-notify
+ExecStart=/usr/bin/battery-notify --daemon
 Restart=on-failure
 
 [Install]

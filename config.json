@@ -1,0 +1,47 @@
+{
+  "timeout": 2000,
+  "levels": [
+    {
+      "trigger": "plugged",
+      "urgency": "normal",
+      "title": "Charger Connected",
+      "message": "Running on AC power. Current level: %LEVEL%%.",
+      "command": ""
+    },
+    {
+      "trigger": "unplugged",
+      "urgency": "normal",
+      "title": "Charger Disconnected",
+      "message": "Running on battery. %TIME% remaining.",
+      "command": ""
+    },
+    {
+      "trigger": 100,
+      "urgency": "normal",
+      "title": "Battery Full",
+      "message": "Battery is fully charged. You can unplug!",
+      "command": ""
+    },
+    {
+      "trigger": 30,
+      "urgency": "normal",
+      "title": "Battery Low",
+      "message": "Battery is at %LEVEL%% (%TIME% remaining).",
+      "command": ""
+    },
+    {
+      "trigger": 15,
+      "urgency": "critical",
+      "title": "Battery Critical",
+      "message": "Connect the charger! Only %LEVEL%% remaining.",
+      "command": ""
+    },
+    {
+      "trigger": 5,
+      "urgency": "critical",
+      "title": "System Suspend",
+      "message": "Battery at %LEVEL%%! Suspending to prevent data loss.",
+      "command": "systemctl suspend"
+    }
+  ]
+}
