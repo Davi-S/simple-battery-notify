@@ -26,5 +26,12 @@ package() {
 }
 
 # Remember to enable and start your new daemon
+# ```
 # systemctl --user daemon-reload
 # systemctl --user enable --now battery-notify.service
+# ```
+# Run
+# ```
+# systemctl --user restart battery-notify.service
+# ```
+# After updating the config
