@@ -1,37 +1,27 @@
 # Maintainer: Davi Alves Sampaio <davialvessampaio00@gmail.com>
-pkgname=battery-notify
+pkgname=simple-battery-notify
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="A customizable, D-Bus driven battery notification daemon and CLI"
 arch=('any')
-url="https://github.com/Davi-S/battery-notify" # Update this later
-license=('GPL3') # Or 'MIT', depending on your preference
+url="https://github.com/Davi-S/simple-battery-notify"
+license=('GPL3')
 depends=('python' 'python-gobject' 'python-pydbus' 'libnotify' 'upower')
-source=('battery-notify'
-        'battery-notify.json'
-        'battery-notify.service')
-sha256sums=('SKIP'
-            'SKIP'
-            'SKIP')
+
+source=("$pkgname-$pkgver.tar.gz::https://github.com/Davi-S/simple-battery-notify/archive/refs/tags/${pkgver}.tar.gz")
+
+# Remember to run updpkgsums or makepkg -g to replace this SKIP!
+sha256sums=('884300dd2b16f7389fb5ec36f63e7a21b617d39ed34aa120cca524087e4a3ee2')
 
 package() {
-    # Install the main Python executable
-    install -Dm755 "$srcdir/battery-notify" "$pkgdir/usr/bin/battery-notify"
+    cd "$srcdir/$pkgname-$pkgver"
+
+    # Install the main Python executable (renaming it without the .py extension)
+    install -Dm755 "battery-notify.py" "$pkgdir/usr/bin/battery-notify"
     
-    # Install the default system-wide configuration
-    install -Dm644 "$srcdir/battery-notify.json" "$pkgdir/etc/battery-notify.json"
+    # Install the default configuration (renaming config.json to battery-notify.json)
+    install -Dm644 "config.json" "$pkgdir/etc/battery-notify.json"
     
     # Install the systemd user service
-    install -Dm644 "$srcdir/battery-notify.service" "$pkgdir/usr/lib/systemd/user/battery-notify.service"
+    install -Dm644 "battery-notify.service" "$pkgdir/usr/lib/systemd/user/battery-notify.service"
 }
-
-# Remember to enable and start your new daemon
-# ```
-# systemctl --user daemon-reload
-# systemctl --user enable --now battery-notify.service
-# ```
-# Run
-# ```
-# systemctl --user restart battery-notify.service
-# ```
-# After updating the config
