@@ -1,9 +1,10 @@
+# Maintainer: Davi Alves Sampaio <davialvessampaio00@gmail.com>
 pkgname=battery-notify
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="A customizable, D-Bus driven battery notification daemon and CLI"
 arch=('any')
-url="https://github.com/YOUR_USERNAME/battery-notify" # Update this later
+url="https://github.com/Davi-S/battery-notify" # Update this later
 license=('GPL3') # Or 'MIT', depending on your preference
 depends=('python' 'python-gobject' 'python-pydbus' 'libnotify' 'upower')
 source=('battery-notify'
@@ -23,3 +24,7 @@ package() {
     # Install the systemd user service
     install -Dm644 "$srcdir/battery-notify.service" "$pkgdir/usr/lib/systemd/user/battery-notify.service"
 }
+
+# Remember to enable and start your new daemon
+# systemctl --user daemon-reload
+# systemctl --user enable --now battery-notify.service
