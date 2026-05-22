@@ -42,17 +42,32 @@ def get_time_string(device):
     return "00:00:00"
 
 
-def trigger_notification(config, percentage, state, time_str, trigger_event=None):
+def trigger_notification(
+    config, percentage, state, time_str, trigger_event=None, last_percent=None
+):
     matched = False
 
     for level in config.get("levels", []):
         trigger = level.get("trigger")
 
-        # Check if it matches an AC event, a CLI event, or a numeric percentage
-        if (trigger_event and trigger == trigger_event) or (
-            trigger_event is None and isinstance(trigger, int) and percentage == trigger
-        ):
+        # Match text triggers (plugged, unplugged, cli-charging, etc.)
+        if trigger_event and trigger == trigger_event:
             matched = True
+
+        # Match numeric percentage triggers (handling skipped percentages)
+        elif trigger_event is None and isinstance(trigger, int):
+            if last_percent is not None:
+                # Check if the battery crossed the trigger going down OR up
+                # This is to avoid not sending a notification if the hardware
+                # reports a increment/decrement bigger than 1%
+                if (last_percent > trigger >= percentage) or (
+                    last_percent < trigger <= percentage
+                ):
+                    matched = True
+            elif percentage == trigger:
+                matched = True
+
+        if matched:
             msg = (
                 level["message"]
                 .replace("%LEVEL%", str(percentage))
@@ -80,7 +95,7 @@ def trigger_notification(config, percentage, state, time_str, trigger_event=None
                 subprocess.run(level["command"], shell=True)
             break
 
-    # Fallback for manual CLI execution if no threshold is met in config
+    # Fallback for manual CLI execution if no threshold is met
     if not matched and trigger_event in ["cli-charging", "cli-discharging"]:
         timeout = str(config.get("timeout", 2000))
         if state in [STATE_CHARGING, STATE_FULLY_CHARGED]:
@@ -137,7 +152,12 @@ class BatteryDaemon:
             # Handle percentage drops/gains instantly
             if current_percent != self.last_percent:
                 trigger_notification(
-                    self.config, current_percent, current_state, time_str
+                    self.config,
+                    current_percent,
+                    current_state,
+                    time_str,
+                    None,
+                    self.last_percent,
                 )
                 self.last_percent = current_percent
 
