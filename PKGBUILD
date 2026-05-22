@@ -1,6 +1,6 @@
 # Maintainer: Davi Alves Sampaio <davialvessampaio00@gmail.com>
 pkgname=simple-battery-notify
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc="A customizable, D-Bus driven battery notification daemon and CLI"
 arch=('any')
@@ -11,7 +11,7 @@ depends=('python' 'python-gobject' 'python-pydbus' 'libnotify' 'upower')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Davi-S/simple-battery-notify/archive/refs/tags/${pkgver}.tar.gz")
 
 # Remember to run updpkgsums or makepkg -g to replace this SKIP!
-sha256sums=('884300dd2b16f7389fb5ec36f63e7a21b617d39ed34aa120cca524087e4a3ee2')
+sha256sums=('da0c7b204f6866148145c96730d3db2922444ff6ed8ac9bfb550977f39e17bfb')
 
 package() {
     cd "$srcdir/$pkgname-$pkgver"
