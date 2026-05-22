@@ -5,7 +5,7 @@
       "trigger": "cli-charging",
       "urgency": "normal",
       "title": "Battery Status",
-      "message": "Battery is at %LEVEL%% (Charging).",
+      "message": "Battery is at %LEVEL%% (%TIME% to full).",
       "command": ""
     },
     {
@@ -19,28 +19,77 @@
       "trigger": "plugged",
       "urgency": "normal",
       "title": "Charger Connected",
-      "message": "Running on AC power. Current level: %LEVEL%%.",
+      "message": "Current level: %LEVEL%%. (%TIME% to full).",
       "command": ""
     },
     {
       "trigger": "unplugged",
       "urgency": "normal",
       "title": "Charger Disconnected",
-      "message": "Running on battery. %TIME% remaining.",
+      "message": "Current level: %LEVEL%%. (%TIME% remaining).",
       "command": ""
     },
     {
       "trigger": 100,
       "urgency": "normal",
       "title": "Battery Full",
-      "message": "Battery is fully charged. You can unplug!",
+      "message": "Battery is fully charged",
+      "command": ""
+    },
+    {
+      "trigger": 90,
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME%).",
+      "command": ""
+    },
+    {
+      "trigger": 80,
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME%).",
+      "command": ""
+    },
+    {
+      "trigger": 70,
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME%).",
+      "command": ""
+    },
+    {
+      "trigger": 60,
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME%).",
+      "command": ""
+    },
+    {
+      "trigger": 50,
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME%).",
+      "command": ""
+    },
+    {
+      "trigger": 40,
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME%).",
       "command": ""
     },
     {
       "trigger": 30,
       "urgency": "normal",
-      "title": "Battery Low",
-      "message": "Battery is at %LEVEL%% (%TIME% remaining).",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME%).",
+      "command": ""
+    },
+    {
+      "trigger": 20,
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME%).",
       "command": ""
     },
     {
@@ -51,11 +100,18 @@
       "command": ""
     },
     {
+      "trigger": 10,
+      "urgency": "critical",
+      "title": "Battery Critical",
+      "message": "Connect the charger! Only %LEVEL%% remaining.",
+      "command": ""
+    },
+    {
       "trigger": 5,
       "urgency": "critical",
-      "title": "System Suspend",
-      "message": "Battery at %LEVEL%%! Suspending to prevent data loss.",
-      "command": "systemctl suspend"
+      "title": "Battery Critical! System Hibernate",
+      "message": "Battery at %LEVEL%%! Hibernating to prevent data loss.",
+      "command": "systemctl hibernate"
     }
   ]
 }
