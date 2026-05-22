@@ -19,14 +19,14 @@
       "trigger": "plugged",
       "urgency": "normal",
       "title": "Charger Connected",
-      "message": "Current level: %LEVEL%%. (%TIME% to full).",
+      "message": "Current level: %LEVEL%%.",
       "command": ""
     },
     {
       "trigger": "unplugged",
       "urgency": "normal",
       "title": "Charger Disconnected",
-      "message": "Current level: %LEVEL%%. (%TIME% remaining).",
+      "message": "Current level: %LEVEL%%.",
       "command": ""
     },
     {
