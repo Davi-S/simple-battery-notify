@@ -1,0 +1,11 @@
+[Unit]
+Description=Sends automatic notifications about the battery status
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/auto-battery-notify
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
