@@ -13,26 +13,24 @@ STATE_CHARGING = 1
 STATE_DISCHARGING = 2
 STATE_FULLY_CHARGED = 4
 
+
 def load_config():
     paths = [
         os.path.expanduser("~/.config/battery-notify/config.json"),
-        "/etc/battery-notify.json"
+        "/etc/battery-notify.json",
     ]
     for path in paths:
         if os.path.isfile(path):
-            try:
-                with open(path, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Error reading {path}: {e}")
-    return {"timeout": 2000, "levels": []}
+            with open(path, "r") as f:
+                return json.load(f)
+    raise FileNotFoundError("Config file was not found")
+
 
 def format_time(seconds):
-    if seconds == 0:
-        return "Unknown time"
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     return f"{int(hours):02}:{int(minutes):02}:00"
+
 
 def get_time_string(device):
     state = int(device.State)
@@ -40,35 +38,72 @@ def get_time_string(device):
         return format_time(device.TimeToEmpty)
     elif state == STATE_CHARGING:
         return format_time(device.TimeToFull)
+    # Fully charged?
     return "00:00:00"
+
 
 def trigger_notification(config, percentage, state, time_str, trigger_event=None):
     matched = False
-    
+
     for level in config.get("levels", []):
         trigger = level.get("trigger")
-        
-        # Check if it matches an AC event ("plugged"/"unplugged") OR a numeric percentage
-        if (trigger_event and trigger == trigger_event) or \
-           (trigger_event is None and isinstance(trigger, int) and percentage == trigger):
-            
+
+        # Check if it matches an AC event, a CLI event, or a numeric percentage
+        if (trigger_event and trigger == trigger_event) or (
+            trigger_event is None and isinstance(trigger, int) and percentage == trigger
+        ):
             matched = True
-            msg = level["message"].replace("%LEVEL%", str(percentage)).replace("%TIME%", time_str)
-            timeout = str(config.get("timeout", 2000) * 1000 if level["urgency"] == "critical" else config.get("timeout", 2000))
-            
-            subprocess.run(["notify-send", "-u", level["urgency"], "-t", timeout, level["title"], msg])
-            
+            msg = (
+                level["message"]
+                .replace("%LEVEL%", str(percentage))
+                .replace("%TIME%", time_str)
+            )
+            timeout = str(
+                config.get("timeout", 2000) * 1000
+                if level["urgency"] == "critical"
+                else config.get("timeout", 2000)
+            )
+
+            subprocess.run(
+                [
+                    "notify-send",
+                    "-u",
+                    level["urgency"],
+                    "-t",
+                    timeout,
+                    level["title"],
+                    msg,
+                ]
+            )
+
             if level.get("command"):
                 subprocess.run(level["command"], shell=True)
             break
 
-    # Fallback for manual CLI execution if no threshold is met
-    if not matched and not trigger_event:
+    # Fallback for manual CLI execution if no threshold is met in config
+    if not matched and trigger_event in ["cli-charging", "cli-discharging"]:
         timeout = str(config.get("timeout", 2000))
         if state in [STATE_CHARGING, STATE_FULLY_CHARGED]:
-            subprocess.run(["notify-send", "-t", timeout, "Battery Status", f"Battery is at {percentage}% (Charging)."])
+            subprocess.run(
+                [
+                    "notify-send",
+                    "-t",
+                    timeout,
+                    "Battery Status",
+                    f"Battery is at {percentage}% (Charging).",
+                ]
+            )
         else:
-            subprocess.run(["notify-send", "-t", timeout, "Battery Status", f"Battery is at {percentage}% ({time_str} remaining)."])
+            subprocess.run(
+                [
+                    "notify-send",
+                    "-t",
+                    timeout,
+                    "Battery Status",
+                    f"Battery is at {percentage}% ({time_str} remaining).",
+                ]
+            )
+
 
 class BatteryDaemon:
     def __init__(self, config, device):
@@ -86,26 +121,46 @@ class BatteryDaemon:
             # Handle AC state changes instantly
             if current_state != self.last_state:
                 if current_state == STATE_CHARGING:
-                    trigger_notification(self.config, current_percent, current_state, time_str, "plugged")
+                    trigger_notification(
+                        self.config, current_percent, current_state, time_str, "plugged"
+                    )
                 elif current_state == STATE_DISCHARGING:
-                    trigger_notification(self.config, current_percent, current_state, time_str, "unplugged")
+                    trigger_notification(
+                        self.config,
+                        current_percent,
+                        current_state,
+                        time_str,
+                        "unplugged",
+                    )
                 self.last_state = current_state
 
             # Handle percentage drops/gains instantly
             if current_percent != self.last_percent:
-                trigger_notification(self.config, current_percent, current_state, time_str)
+                trigger_notification(
+                    self.config, current_percent, current_state, time_str
+                )
                 self.last_percent = current_percent
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Battery notification daemon and CLI tool.")
-    parser.add_argument("-d", "--daemon", action="store_true", help="Run in the background and listen to D-Bus events")
+    parser = argparse.ArgumentParser(
+        description="Battery notification daemon and CLI tool."
+    )
+    parser.add_argument(
+        "-d",
+        "--daemon",
+        action="store_true",
+        help="Run in the background and listen to D-Bus events",
+    )
     args = parser.parse_args()
 
     config = load_config()
 
     try:
         bus = SystemBus()
-        display_device = bus.get('org.freedesktop.UPower', '/org/freedesktop/UPower/devices/DisplayDevice')
+        display_device = bus.get(
+            "org.freedesktop.UPower", "/org/freedesktop/UPower/devices/DisplayDevice"
+        )
     except Exception as e:
         print(f"Failed to connect to UPower via D-Bus: {e}", file=sys.stderr)
         sys.exit(1)
@@ -113,18 +168,26 @@ def main():
     if args.daemon:
         daemon = BatteryDaemon(config, display_device)
         display_device.PropertiesChanged.connect(daemon.on_properties_changed)
-        
+
         loop = GLib.MainLoop()
         try:
             loop.run()
         except KeyboardInterrupt:
             sys.exit(0)
     else:
-        # Manual keybind execution path
+        # Manual CLI execution path
         percent = int(display_device.Percentage)
         state = int(display_device.State)
         time_str = get_time_string(display_device)
-        trigger_notification(config, percent, state, time_str)
+
+        if state in [STATE_CHARGING, STATE_FULLY_CHARGED]:
+            trigger_event = "cli-charging"
+        else:
+            trigger_event = "cli-discharging"
+
+        trigger_notification(config, percent, state, time_str, trigger_event)
+
 
 if __name__ == "__main__":
     main()
+

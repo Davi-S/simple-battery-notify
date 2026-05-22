@@ -2,6 +2,20 @@
   "timeout": 2000,
   "levels": [
     {
+      "trigger": "cli-charging",
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (Charging).",
+      "command": ""
+    },
+    {
+      "trigger": "cli-discharging",
+      "urgency": "normal",
+      "title": "Battery Status",
+      "message": "Battery is at %LEVEL%% (%TIME% remaining).",
+      "command": ""
+    },
+    {
       "trigger": "plugged",
       "urgency": "normal",
       "title": "Charger Connected",
