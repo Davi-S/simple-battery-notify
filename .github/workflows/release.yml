@@ -1,0 +1,237 @@
+# =============================================================================
+# Release workflow
+# =============================================================================
+#
+# What it does, in order (each job is also described step by step, with the
+# equivalent manual commands, in RELEASING.md under "Manual release"):
+#
+#   1. check           Validate the version: the tag exists, it matches
+#                      VERSION="..." in src/battery-notify, and CHANGELOG.md has an
+#                      entry for it. Nothing is published if this fails.
+#   2. github-release  Create the GitHub Release for the tag, using the
+#                      CHANGELOG.md entry as the release notes.
+#   3. aur             Publish packaging/aur/PKGBUILD to the AUR by running
+#                      scripts/publish-aur.sh, the same script used manually.
+#
+# How it is started:
+#
+#   - Automatically, when a tag like v1.2.3 is pushed. scripts/release.sh
+#     creates that tag; `git push --follow-tags origin main` pushes it.
+#     All three jobs run.
+#
+#   - By hand: GitHub -> Actions -> Release -> "Run workflow". You give a
+#     version (the tag must already exist) and an AUR pkgrel. Only `check` and
+#     `aur` run; `github-release` is skipped. Use this to re-publish to the AUR,
+#     e.g. pkgrel=2 after a packaging-only fix to packaging/aur/PKGBUILD.
+#     Choose the `main` branch in the "Use workflow from" menu, so the latest
+#     PKGBUILD template is used.
+#
+# Safe to re-run: an existing GitHub Release is left alone, and
+# publish-aur.sh does nothing if the AUR already has the same PKGBUILD.
+#
+# Requires one repository secret, AUR_SSH_PRIVATE_KEY (see RELEASING.md,
+# "One-time setup"). The GitHub token for creating releases is provided
+# automatically by GitHub Actions.
+#
+# To disable AUR publishing but keep GitHub Releases, delete the `aur` job.
+# To stop automatic releases entirely, delete this file.
+# =============================================================================
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, without the v (e.g. 1.2.3). The tag v<version> must exist."
+        required: true
+        type: string
+      pkgrel:
+        description: "AUR pkgrel. 1 for a new version; bump only for packaging-only fixes."
+        required: true
+        default: "1"
+        type: string
+
+# Never run two releases at the same time (they would race to push to the AUR).
+# A second run waits for the first instead of cancelling it.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Default: read-only token. Jobs that need more ask for it explicitly.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. check: make sure the version is consistent before publishing anything.
+  # ---------------------------------------------------------------------------
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # Passed to the other jobs as needs.check.outputs.version
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # fetch-depth: 0 downloads the full history and all tags, so the tag can
+      # be inspected even on a manual run started from `main`.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Work out the version (X.Y.Z, no "v") from the tag or the manual input.
+      # User input is passed through `env:` and never pasted into the script
+      # with ${{ }}, which would allow shell injection.
+      - name: Determine version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            version="${GITHUB_REF_NAME#v}"   # refs/tags/v1.2.3 -> 1.2.3
+          else
+            version="${INPUT_VERSION#v}"     # accept "1.2.3" or "v1.2.3"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$version' is not a version of the form X.Y.Z"
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "Releasing version $version"
+
+      # The tag must exist, since the AUR package downloads
+      # https://github.com/Davi-S/simple-battery-notify/archive/refs/tags/v<version>.tar.gz
+      - name: Check the tag exists
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION does not exist. Create it with scripts/release.sh and push it."
+            exit 1
+          fi
+
+      # The program must report the same version the package is called.
+      # Reads src/battery-notify as it is *in the tag*, not in the current checkout.
+      - name: Check the tag matches VERSION in src/battery-notify
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          script_version="$(git show "v$VERSION:src/battery-notify" | sed -n 's/^VERSION="\(.*\)"$/\1/p')"
+          if [[ "$script_version" != "$VERSION" ]]; then
+            echo "::error::Tag v$VERSION has VERSION=\"$script_version\" in src/battery-notify. Tag with scripts/release.sh."
+            exit 1
+          fi
+
+      # The GitHub Release notes come from CHANGELOG.md, so the entry must exist.
+      - name: Check CHANGELOG.md has an entry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git checkout -q "v$VERSION" -- CHANGELOG.md
+          scripts/release-notes.sh "$VERSION"
+
+  # ---------------------------------------------------------------------------
+  # 2. github-release: create the Release page for the tag (tag pushes only).
+  # ---------------------------------------------------------------------------
+  github-release:
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # needed to create releases
+    steps:
+      - uses: actions/checkout@v5
+
+      # `gh` is preinstalled on GitHub's Ubuntu runners and uses GH_TOKEN.
+      # If the release already exists (e.g. this is a re-run), keep it.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; leaving it as is."
+            exit 0
+          fi
+          scripts/release-notes.sh "$VERSION" >notes.md
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file notes.md --verify-tag
+
+  # ---------------------------------------------------------------------------
+  # 3. aur: publish the package to the AUR.
+  # ---------------------------------------------------------------------------
+  aur:
+    needs: [check, github-release]
+    # Run if nothing failed. On manual runs github-release is "skipped", which
+    # is fine; a plain `needs` would otherwise skip this job too.
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # makepkg and updpkgsums only exist on Arch, so run inside an Arch container.
+    # base-devel includes makepkg, fakeroot, make and sudo.
+    container: archlinux:base-devel
+    steps:
+      # Fail early, with a clear message, if the secret was never configured.
+      - name: Check the AUR key is configured
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
+            echo "::error::Secret AUR_SSH_PRIVATE_KEY is not set. See RELEASING.md, 'One-time setup'."
+            exit 1
+          fi
+
+      # On a tag push this checks out the tag; on a manual run, the branch you
+      # chose (normally main). The PKGBUILD template is taken from here.
+      - uses: actions/checkout@v5
+
+      # git: clone/push the AUR repo; openssh: talk to aur.archlinux.org;
+      # pacman-contrib: provides updpkgsums.
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed git openssh pacman-contrib
+
+      # makepkg refuses to run as root, and the container runs as root, so
+      # create a normal user "builder" and give it the AUR key.
+      #
+      # known_hosts pins the AUR's ed25519 host key, so we only talk to the
+      # real server. Its fingerprint, SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4,
+      # is published on https://aur.archlinux.org (bottom of the page). If the
+      # AUR ever rotates keys, this step fails with "Host key verification
+      # failed": get the new line with `ssh-keyscan -t ed25519 aur.archlinux.org`,
+      # check its fingerprint (`ssh-keygen -lf <file>`) against the AUR page,
+      # and replace the line below.
+      #
+      # It also prints the fingerprint of the key in the secret (public
+      # information, safe to log). If publishing fails with "Permission denied
+      # (publickey)", compare it with `ssh-keygen -lf ~/.ssh/aur_ci.pub`, the key
+      # that must be saved on your AUR account. An invalid key fails here.
+      - name: Set up build user and SSH
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          useradd --create-home builder
+          ssh_dir=/home/builder/.ssh
+          install -d -m 700 "$ssh_dir"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" >"$ssh_dir/aur"
+          chmod 600 "$ssh_dir/aur"
+          echo "AUR key in the secret: $(ssh-keygen -lf "$ssh_dir/aur")"
+          echo 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' >"$ssh_dir/known_hosts"
+          printf '%s\n' \
+            'Host aur.archlinux.org' \
+            '  User aur' \
+            '  IdentityFile ~/.ssh/aur' \
+            '  IdentitiesOnly yes' \
+            '  StrictHostKeyChecking yes' >"$ssh_dir/config"
+          chmod 600 "$ssh_dir"/*
+          chown -R builder:builder "$ssh_dir" "$GITHUB_WORKSPACE"
+
+      # Everything else (clone the AUR repo, fill in pkgver/pkgrel, update
+      # checksums, test-build, regenerate .SRCINFO, commit, push) is in
+      # scripts/publish-aur.sh, so it can be run the same way by hand.
+      - name: Publish to AUR
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          PKGREL: ${{ inputs.pkgrel || '1' }}
+        run: sudo -H -u builder scripts/publish-aur.sh "$VERSION" "$PKGREL"

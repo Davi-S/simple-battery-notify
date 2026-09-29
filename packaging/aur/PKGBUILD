@@ -1,0 +1,23 @@
+# Maintainer: Davi Alves Sampaio <davialvessampaio00@gmail.com>
+#
+# This is the TEMPLATE for the AUR package. Do not bump pkgver/pkgrel or
+# checksums here by hand: scripts/publish-aur.sh sets them when publishing.
+# Edit this file only to change packaging (dependencies, install steps, ...).
+
+pkgname=simple-battery-notify
+pkgver=1.0.5
+pkgrel=1
+pkgdesc="A customizable, D-Bus driven battery notification daemon and CLI"
+arch=('any')
+url="https://github.com/Davi-S/simple-battery-notify"
+license=('GPL-3.0-or-later')
+depends=('python' 'python-gobject' 'python-pydbus' 'libnotify' 'upower')
+# pacman keeps local edits to these on upgrade (and installs a .pacnew instead).
+backup=('etc/battery-notify.json')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$pkgname-$pkgver"
+    make DESTDIR="$pkgdir" PREFIX=/usr SYSCONFDIR=/etc install
+}

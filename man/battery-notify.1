@@ -1,0 +1,51 @@
+.TH BATTERY-NOTIFY 1 "2026-09-29" "simple-battery-notify" "User Commands"
+.SH NAME
+battery-notify \- battery notifications from UPower
+.SH SYNOPSIS
+.B battery-notify
+.RB [ \-\-daemon ]
+.br
+.B battery-notify
+.BR \-\-help " | " \-\-version
+.SH DESCRIPTION
+Without options,
+.B battery-notify
+shows a notification with the current battery level and time remaining.
+.PP
+With
+.BR \-\-daemon ,
+it runs in the background, listens to UPower over D-Bus, and shows
+notifications when the charger is connected or disconnected and when the
+battery reaches the levels set in the configuration. It is meant to run as the
+systemd user service
+.BR battery-notify.service :
+.PP
+.RS
+.nf
+systemctl \-\-user enable \-\-now battery-notify.service
+.fi
+.RE
+.SH OPTIONS
+.TP
+.BR \-d ", " \-\-daemon
+Run in the background.
+.TP
+.BR \-V ", " \-\-version
+Print the version.
+.TP
+.BR \-h ", " \-\-help
+Print usage information.
+.SH FILES
+.TP
+.I ~/.config/battery-notify/config.json
+Your configuration. If absent,
+.I /etc/battery-notify.json
+is used.
+.PP
+The format is described in the README, installed at
+.IR /usr/share/doc/simple-battery-notify/README.md .
+.SH SEE ALSO
+.BR upower (1),
+.BR notify-send (1)
+.SH BUGS
+Report issues at https://github.com/Davi-S/simple-battery-notify/issues

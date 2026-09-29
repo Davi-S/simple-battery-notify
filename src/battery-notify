@@ -8,6 +8,9 @@ import subprocess
 from pydbus import SystemBus
 from gi.repository import GLib
 
+# Set by scripts/release.sh; keep the exact form VERSION="X.Y.Z".
+VERSION="1.0.5"
+
 # UPower State Enums
 STATE_CHARGING = 1
 STATE_DISCHARGING = 2
@@ -171,6 +174,9 @@ def main():
         "--daemon",
         action="store_true",
         help="Run in the background and listen to D-Bus events",
+    )
+    parser.add_argument(
+        "-V", "--version", action="version", version=f"battery-notify {VERSION}"
     )
     args = parser.parse_args()
 

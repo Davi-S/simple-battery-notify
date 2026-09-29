@@ -4,7 +4,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/battery-notify --daemon
+ExecStart=@BINDIR@/battery-notify --daemon
 Restart=on-failure
 
 [Install]

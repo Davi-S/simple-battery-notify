@@ -41,6 +41,17 @@ using your preferred AUR helper (such as `yay` or `paru`):
 paru -S simple-battery-notify
 ```
 
+### From source
+
+Dependencies: the ones above, plus `make` to install.
+
+```bash
+git clone https://github.com/Davi-S/simple-battery-notify.git
+cd simple-battery-notify
+sudo make install              # installs to /usr/local; use PREFIX=/usr to change
+sudo make uninstall            # to remove
+```
+
 ## Usage
 
 ### 1. The Background Daemon
@@ -79,7 +90,6 @@ customize your settings, copy it to your local user directory:
 ```bash
 mkdir -p ~/.config/battery-notify
 cp /etc/battery-notify.json ~/.config/battery-notify/config.json
-
 ```
 
 ### Configuration Structure
@@ -147,3 +157,12 @@ dynamically replaced when the notification fires:
   displays the time until full. If discharging, it displays the time until
   empty.
 
+## Development
+
+- `make check` runs `shellcheck` and `shfmt` on the scripts, the same checks as CI.
+- Record changes under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
+- Releases and AUR publishing are described in [`RELEASING.md`](RELEASING.md).
+
+## License
+
+[GPL-3.0-or-later](LICENSE)
