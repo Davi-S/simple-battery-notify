@@ -350,3 +350,23 @@ titel = a'
     assert_equal "$(calls notify-send | wc -l)" 2
     assert_stderr $'battery-notify: could not send a notification\nbattery-notify: could not send a notification\nbattery-notify: lost the connection to UPower'
 }
+
+@test "daemon: stopping it (SIGTERM) also stops its monitor" {
+    readings "1 50 0 3000"
+    fake gdbus --hang
+    # 3>&-: a background process must not keep bats' own output open.
+    "$BATTERY_NOTIFY" daemon 3>&- &
+    local -r pid=$!
+    local i
+    for ((i = 0; i < 50; i++)); do
+        [[ -s "$FAKE_DIR/gdbus.hanging" ]] && break
+        sleep 0.1
+    done
+    [[ -s "$FAKE_DIR/gdbus.hanging" ]] || fail "the monitor never started"
+    sleep 0.2
+    kill -TERM "$pid"
+    local -i status=0
+    wait "$pid" || status=$?
+    assert_equal "$status" 143
+    refute_hanging gdbus
+}

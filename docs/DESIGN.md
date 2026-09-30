@@ -126,6 +126,12 @@ As in expresso and decaf: one file, `src/battery-notify`, in layers
 fakes (`gdbus`, `busctl`, `notify-send`, …), and a local `tests/integration.sh`
 against the real UPower.
 
+- `make integration`: `status` against `upower`'s own report, `show` and its
+  speed, config errors, and the daemon across real UPower events. The daemon
+  runs with a temporary config folder, and wrappers first on `PATH` log its
+  `busctl` and `notify-send` calls (the real commands still run).
+- `make integration CHARGER=1` adds an unplug/replug check the user performs.
+
 ## `status` and exit codes
 
 ```

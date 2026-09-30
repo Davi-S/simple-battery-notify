@@ -14,7 +14,8 @@
 # Conventions:
 #   - Globals are readonly constants. Everything else is `local`.
 #   - Functions return data on stdout and a status as their exit code.
-#     Only `main`'s caller exits.
+#     Only `main`'s caller exits (and the daemon's signal traps, which can't
+#     return anywhere).
 #   - Errors propagate explicitly with `|| return`. `set -e` is not relied on
 #     inside functions, because Bash disables it in many contexts.
 #   - The layer that detects a problem reports it, except the core: it returns
@@ -643,6 +644,12 @@ core_daemon() {
 
     # Started before the first reading, so no change can be missed.
     sys_monitor_open fd pid
+    # Stopped by a signal (systemctl stop, Ctrl-C), don't leave the monitor
+    # behind. The PID is expanded now, on purpose.
+    # shellcheck disable=SC2064
+    trap "kill $pid 2>/dev/null; exit 143" TERM
+    # shellcheck disable=SC2064
+    trap "kill $pid 2>/dev/null; exit 130" INT
     if battery="$(sys_read_battery)"; then
         read -r state percent to_empty to_full <<<"$battery"
         while IFS= read -r event; do
