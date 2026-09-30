@@ -9,7 +9,7 @@ BASHCOMPDIR = $(DESTDIR)$(PREFIX)/share/bash-completion/completions
 USERUNITDIR = $(DESTDIR)$(PREFIX)/lib/systemd/user
 CONFDIR     = $(DESTDIR)$(SYSCONFDIR)
 
-SHELL_SOURCES = completions/battery-notify.bash scripts/*.sh \
+SHELL_SOURCES = src/battery-notify completions/battery-notify.bash scripts/*.sh \
                 tests/helpers.bash tests/fakes/fake tests/*.bats
 
 BATS ?= bats

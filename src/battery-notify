@@ -1,218 +1,529 @@
-#!/usr/bin/env python3
+#!/usr/bin/env bash
+#
+# battery-notify: battery notifications from UPower.
+#
+# The design, and the reasons behind it, are in docs/DESIGN.md.
+#
+# Layers, top to bottom. Each calls only the layers below it.
+#   cli     argv → validated values; prints messages; maps results to exit codes
+#   core    show, status, daemon
+#   system  the only code that runs external commands or reads files; validates
+#           what they return and reports its own failures (not written yet)
+#   values  pure functions: no I/O besides printing the result
+#
+# Conventions:
+#   - Globals are readonly constants. Everything else is `local`.
+#   - Functions return data on stdout and a status as their exit code.
+#     Only `main`'s caller exits.
+#   - Errors propagate explicitly with `|| return`. `set -e` is not relied on
+#     inside functions, because Bash disables it in many contexts.
+#   - The layer that detects a problem reports it, except the core: it returns
+#     a code, and the cli turns it into a message.
+#   - Never do arithmetic on an unvalidated string: Bash evaluates it as an
+#     expression, which can run commands. Validate with a regex first.
 
-import os
-import sys
-import json
-import argparse
-import subprocess
-from pydbus import SystemBus
-from gi.repository import GLib
-
-# Set by scripts/release.sh; keep the exact form VERSION="X.Y.Z".
 VERSION="1.0.5"
+readonly VERSION
 
-# UPower State Enums
-STATE_CHARGING = 1
-STATE_DISCHARGING = 2
-STATE_FULLY_CHARGED = 4
+# Exit codes. Each has one meaning across all commands.
+readonly EXIT_USAGE=2
+# TODO(rewrite step 3): drop this directive once the system layer uses it.
+# shellcheck disable=SC2034
+readonly EXIT_CONFIG=3
+readonly EXIT_SYSTEM=4
 
+# Separates the fields of a parsed config rule: EVENT URGENCY TIMEOUT TITLE
+# MESSAGE. The ASCII unit separator, which the parser refuses in values.
+readonly SEP=$'\x1f'
 
-def load_config():
-    paths = [
-        os.path.expanduser("~/.config/battery-notify/config.json"),
-        "/etc/battery-notify.json",
-    ]
-    for path in paths:
-        if os.path.isfile(path):
-            with open(path, "r") as f:
-                return json.load(f)
-    raise FileNotFoundError("Config file was not found")
+# Used when the user has no config file. Also installed as config.example.
+# TODO(rewrite step 3): drop this directive once the system layer uses it.
+# shellcheck disable=SC2034
+readonly DEFAULT_CONFIG='# battery-notify configuration.
+#
+# Copy to ~/.config/battery-notify/config and edit; then restart the service:
+#   systemctl --user restart battery-notify.service
+# The file replaces these defaults entirely. See "man battery-notify".
+#
+# Each section is an event:
+#   [discharging N]   on battery, the level drops to N% or below
+#   [charging N]      on AC, the level rises to N% or above
+#   [full]            UPower reports "fully charged"
+#   [plugged]         the charger is connected
+#   [unplugged]       the charger is disconnected
+#   [show discharging], [show charging], [show full]
+#                     "battery-notify show", by state
+# Keys: title (required), message, urgency (low, normal, critical; default
+# normal), timeout (milliseconds; default 2000, 0 for critical: stays until
+# dismissed). Placeholders: {level} (percentage), {time} (h:mm left).
 
+[show discharging]
+title = Battery {level}%
+message = {time} remaining
 
-def format_time(seconds):
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    return f"{int(hours):02}:{int(minutes):02}:00"
+[show charging]
+title = Battery {level}% · charging
+message = {time} to full
 
+[show full]
+title = Battery full
 
-def get_time_string(device):
-    state = int(device.State)
-    if state == STATE_DISCHARGING:
-        return format_time(device.TimeToEmpty)
-    elif state == STATE_CHARGING:
-        return format_time(device.TimeToFull)
-    # Fully charged?
-    return "00:00:00"
+[plugged]
+title = Charger connected
+message = Battery {level}%
 
+[unplugged]
+title = Charger disconnected
+message = Battery {level}% · {time} remaining
 
-def trigger_notification(
-    config, percentage, state, time_str, trigger_event=None, last_percent=None
-):
-    matched = False
+[full]
+title = Battery full
 
-    for level in config.get("levels", []):
-        trigger = level.get("trigger")
+[discharging 90]
+title = Battery {level}%
+message = {time} remaining
 
-        # Match text triggers (plugged, unplugged, cli-charging, etc.)
-        if trigger_event and trigger == trigger_event:
-            matched = True
+[discharging 80]
+title = Battery {level}%
+message = {time} remaining
 
-        # Match numeric percentage triggers (handling skipped percentages)
-        elif trigger_event is None and isinstance(trigger, int):
-            if last_percent is not None:
-                # Check if the battery crossed the trigger going down OR up
-                # This is to avoid not sending a notification if the hardware
-                # reports a increment/decrement bigger than 1%
-                if (last_percent > trigger >= percentage) or (
-                    last_percent < trigger <= percentage
-                ):
-                    matched = True
-            elif percentage == trigger:
-                matched = True
+[discharging 70]
+title = Battery {level}%
+message = {time} remaining
 
-        if matched:
-            msg = (
-                level["message"]
-                .replace("%LEVEL%", str(percentage))
-                .replace("%TIME%", time_str)
-            )
-            timeout = str(
-                config.get("timeout", 2000) * 1000
-                if level["urgency"] == "critical"
-                else config.get("timeout", 2000)
-            )
+[discharging 60]
+title = Battery {level}%
+message = {time} remaining
 
-            subprocess.run(
-                [
-                    "notify-send",
-                    "-u",
-                    level["urgency"],
-                    "-t",
-                    timeout,
-                    level["title"],
-                    msg,
-                ]
-            )
+[discharging 50]
+title = Battery {level}%
+message = {time} remaining
 
-            if level.get("command"):
-                subprocess.run(level["command"], shell=True)
-            break
+[discharging 40]
+title = Battery {level}%
+message = {time} remaining
 
-    # Fallback for manual CLI execution if no threshold is met
-    if not matched and trigger_event in ["cli-charging", "cli-discharging"]:
-        timeout = str(config.get("timeout", 2000))
-        if state in [STATE_CHARGING, STATE_FULLY_CHARGED]:
-            subprocess.run(
-                [
-                    "notify-send",
-                    "-t",
-                    timeout,
-                    "Battery Status",
-                    f"Battery is at {percentage}% (Charging).",
-                ]
-            )
-        else:
-            subprocess.run(
-                [
-                    "notify-send",
-                    "-t",
-                    timeout,
-                    "Battery Status",
-                    f"Battery is at {percentage}% ({time_str} remaining).",
-                ]
-            )
+[discharging 30]
+title = Battery {level}%
+message = {time} remaining
 
+[discharging 20]
+title = Battery {level}%
+message = {time} remaining
 
-class BatteryDaemon:
-    def __init__(self, config, device):
-        self.config = config
-        self.device = device
-        self.last_percent = int(device.Percentage)
-        self.last_state = int(device.State)
+[discharging 15]
+urgency = critical
+title = Battery low
+message = Connect the charger: {level}% left
 
-    def on_properties_changed(self, interface, changed, invalidated):
-        if "Percentage" in changed or "State" in changed:
-            current_percent = int(self.device.Percentage)
-            current_state = int(self.device.State)
-            time_str = get_time_string(self.device)
+[discharging 10]
+urgency = critical
+title = Battery low
+message = Connect the charger: {level}% left
 
-            # Handle AC state changes instantly
-            if current_state != self.last_state:
-                if current_state == STATE_CHARGING:
-                    trigger_notification(
-                        self.config, current_percent, current_state, time_str, "plugged"
-                    )
-                elif current_state == STATE_DISCHARGING:
-                    trigger_notification(
-                        self.config,
-                        current_percent,
-                        current_state,
-                        time_str,
-                        "unplugged",
-                    )
-                self.last_state = current_state
+[discharging 5]
+urgency = critical
+title = Battery critical
+message = Connect the charger now: {level}% left
+'
 
-            # Handle percentage drops/gains instantly
-            if current_percent != self.last_percent:
-                trigger_notification(
-                    self.config,
-                    current_percent,
-                    current_state,
-                    time_str,
-                    None,
-                    self.last_percent,
-                )
-                self.last_percent = current_percent
+# --- values: configuration ---------------------------------------------------
 
+# is_event NAME: succeeds if NAME is a config section name.
+is_event() {
+    [[ "$1" =~ ^(discharging|charging)\ ([1-9][0-9]?|100)$ ||
+        "$1" =~ ^(full|plugged|unplugged)$ ||
+        "$1" =~ ^show\ (discharging|charging|full)$ ]]
+}
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Battery notification daemon and CLI tool."
-    )
-    parser.add_argument(
-        "-d",
-        "--daemon",
-        action="store_true",
-        help="Run in the background and listen to D-Bus events",
-    )
-    parser.add_argument(
-        "-V", "--version", action="version", version=f"battery-notify {VERSION}"
-    )
-    args = parser.parse_args()
+# check_text LINE KEY VALUE
+# Succeeds if VALUE is a valid title or message. Otherwise prints the problem
+# as "LINE: problem".
+check_text() {
+    local -r line="$1" key="$2" value="$3"
+    if [[ "$value" == *"$SEP"* ]]; then
+        printf '%s: invalid character in %s\n' "$line" "$key"
+        return 1
+    fi
+    local rest="$value" placeholder
+    while [[ "$rest" =~ \{[^{}]*\} ]]; do
+        placeholder="${BASH_REMATCH[0]}"
+        if [[ "$placeholder" != "{level}" && "$placeholder" != "{time}" ]]; then
+            printf "%s: unknown placeholder '%s': expected {level} or {time}\n" "$line" "$placeholder"
+            return 1
+        fi
+        rest="${rest#*"$placeholder"}"
+    done
+}
 
-    config = load_config()
+# config_rule LINE EVENT TITLE MESSAGE URGENCY TIMEOUT
+# Print the rule of a finished section, with defaults filled in. Fails, printing
+# "LINE: problem", if the section has no title.
+config_rule() {
+    local -r line="$1" event="$2" title="$3" message="$4" urgency="${5:-normal}"
+    local timeout="$6"
+    if [[ -z "$title" ]]; then
+        printf '%s: section [%s] has no title\n' "$line" "$event"
+        return 1
+    fi
+    if [[ -z "$timeout" ]]; then
+        if [[ "$urgency" == critical ]]; then timeout=0; else timeout=2000; fi
+    fi
+    printf '%s\n' "$event$SEP$urgency$SEP$timeout$SEP$title$SEP$message"
+}
 
-    try:
-        bus = SystemBus()
-        display_device = bus.get(
-            "org.freedesktop.UPower", "/org/freedesktop/UPower/devices/DisplayDevice"
-        )
-    except Exception as e:
-        print(f"Failed to connect to UPower via D-Bus: {e}", file=sys.stderr)
-        sys.exit(1)
+# parse_config TEXT
+# Parse a configuration. Prints one rule per section, in file order:
+# EVENT SEP URGENCY SEP TIMEOUT SEP TITLE SEP MESSAGE. On the first mistake,
+# prints "LINE: problem" instead and fails.
+parse_config() {
+    local line key value lineno=0 rule
+    local event="" event_line=0 title="" message="" urgency="" timeout=""
+    local keys=" " sections=" "
+    local -a parsed=()
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        lineno=$((lineno + 1))
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        if [[ -z "$line" || "$line" == \#* ]]; then
+            continue
+        fi
 
-    if args.daemon:
-        daemon = BatteryDaemon(config, display_device)
-        display_device.PropertiesChanged.connect(daemon.on_properties_changed)
+        if [[ "$line" =~ ^\[(.*)\]$ ]]; then
+            if [[ -n "$event" ]]; then
+                rule="$(config_rule "$event_line" "$event" "$title" "$message" "$urgency" "$timeout")" || {
+                    printf '%s\n' "$rule"
+                    return 1
+                }
+                parsed+=("$rule")
+            fi
+            event="${BASH_REMATCH[1]}"
+            if ! is_event "$event"; then
+                printf "%s: unknown event '%s'\n" "$lineno" "$event"
+                return 1
+            fi
+            if [[ "$sections" == *" [$event] "* ]]; then
+                printf '%s: duplicate section [%s]\n' "$lineno" "$event"
+                return 1
+            fi
+            sections+="[$event] "
+            event_line="$lineno" title="" message="" urgency="" timeout="" keys=" "
 
-        loop = GLib.MainLoop()
-        try:
-            loop.run()
-        except KeyboardInterrupt:
-            sys.exit(0)
-    else:
-        # Manual CLI execution path
-        percent = int(display_device.Percentage)
-        state = int(display_device.State)
-        time_str = get_time_string(display_device)
+        elif [[ "$line" =~ ^([a-z]+)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
+            if [[ -z "$event" ]]; then
+                printf "%s: '%s' is outside a section\n" "$lineno" "$key"
+                return 1
+            fi
+            if [[ "$keys" == *" $key "* ]]; then
+                printf "%s: duplicate key '%s'\n" "$lineno" "$key"
+                return 1
+            fi
+            keys+="$key "
+            case "$key" in
+            title)
+                if [[ -z "$value" ]]; then
+                    printf '%s: empty title\n' "$lineno"
+                    return 1
+                fi
+                check_text "$lineno" title "$value" || return 1
+                title="$value"
+                ;;
+            message)
+                check_text "$lineno" message "$value" || return 1
+                message="$value"
+                ;;
+            urgency)
+                if [[ ! "$value" =~ ^(low|normal|critical)$ ]]; then
+                    printf "%s: invalid urgency '%s': expected low, normal or critical\n" "$lineno" "$value"
+                    return 1
+                fi
+                urgency="$value"
+                ;;
+            timeout)
+                if [[ ! "$value" =~ ^(0|[1-9][0-9]{0,6})$ ]]; then
+                    printf "%s: invalid timeout '%s': expected milliseconds from 0 to 9999999\n" "$lineno" "$value"
+                    return 1
+                fi
+                timeout="$value"
+                ;;
+            *)
+                printf "%s: unknown key '%s'\n" "$lineno" "$key"
+                return 1
+                ;;
+            esac
 
-        if state in [STATE_CHARGING, STATE_FULLY_CHARGED]:
-            trigger_event = "cli-charging"
-        else:
-            trigger_event = "cli-discharging"
+        else
+            printf "%s: expected '[event]' or 'key = value'\n" "$lineno"
+            return 1
+        fi
+    done <<<"$1"
 
-        trigger_notification(config, percent, state, time_str, trigger_event)
+    if [[ -n "$event" ]]; then
+        rule="$(config_rule "$event_line" "$event" "$title" "$message" "$urgency" "$timeout")" || {
+            printf '%s\n' "$rule"
+            return 1
+        }
+        parsed+=("$rule")
+    fi
+    if ((${#parsed[@]} > 0)); then
+        printf '%s\n' "${parsed[@]}"
+    fi
+}
 
+# rule_for EVENT RULES: print EVENT's rule; fails if it has none.
+rule_for() {
+    local -r event="$1"
+    local rule
+    while IFS= read -r rule; do
+        if [[ "${rule%%"$SEP"*}" == "$event" ]]; then
+            printf '%s\n' "$rule"
+            return 0
+        fi
+    done <<<"$2"
+    return 1
+}
 
-if __name__ == "__main__":
-    main()
+# levels_of KIND RULES: print the levels of the "KIND N" rules, one per line.
+levels_of() {
+    local -r kind="$1"
+    local rule event
+    while IFS= read -r rule; do
+        event="${rule%%"$SEP"*}"
+        if [[ "$event" == "$kind "* ]]; then
+            printf '%s\n' "${event#"$kind "}"
+        fi
+    done <<<"$2"
+}
+
+# fill_placeholders TEXT LEVEL TIME
+fill_placeholders() {
+    local text="$1"
+    # Quoted replacements are literal (no `&` expansion in Bash 5.2+).
+    text="${text//"{level}"/"$2"}"
+    text="${text//"{time}"/"$3"}"
+    printf '%s\n' "$text"
+}
+
+# render_rule RULE LEVEL TIME
+# Print what to notify: URGENCY SEP TIMEOUT SEP TITLE SEP MESSAGE.
+render_rule() {
+    local event urgency timeout title message
+    IFS="$SEP" read -r event urgency timeout title message <<<"$1"
+    printf '%s\n' "$urgency$SEP$timeout$SEP$(fill_placeholders "$title" "$2" "$3")$SEP$(fill_placeholders "$message" "$2" "$3")"
+}
+
+# --- values: battery ---------------------------------------------------------
+
+# state_name CODE: UPower's Device.State number as a name.
+state_name() {
+    case "$1" in
+    0) printf 'unknown\n' ;;
+    1) printf 'charging\n' ;;
+    2) printf 'discharging\n' ;;
+    3) printf 'empty\n' ;;
+    4) printf 'full\n' ;;
+    5) printf 'pending-charge\n' ;;
+    6) printf 'pending-discharge\n' ;;
+    *) return 1 ;;
+    esac
+}
+
+# power_source STATE: "ac", "battery" or "unknown".
+# pending-charge is on AC but not charging, e.g. held at a charge limit.
+power_source() {
+    case "$1" in
+    charging | full | pending-charge) printf 'ac\n' ;;
+    discharging | empty | pending-discharge) printf 'battery\n' ;;
+    *) printf 'unknown\n' ;;
+    esac
+}
+
+# time_for STATE TIME_TO_EMPTY TIME_TO_FULL: the seconds {time} refers to:
+# to empty on battery, to full while charging, else 0 (none).
+time_for() {
+    case "$1" in
+    discharging | empty | pending-discharge) printf '%s\n' "$2" ;;
+    charging) printf '%s\n' "$3" ;;
+    *) printf '0\n' ;;
+    esac
+}
+
+# format_time SECONDS: "h:mm", or "unknown" for 0 (UPower still estimating).
+format_time() {
+    local -r seconds="$1"
+    if ((seconds == 0)); then
+        printf 'unknown\n'
+    else
+        printf '%d:%02d\n' $((seconds / 3600)) $((seconds % 3600 / 60))
+    fi
+}
+
+# format_status STATE PERCENTAGE TIME_TO_EMPTY TIME_TO_FULL
+format_status() {
+    printf '%s\n' \
+        "state=$1" \
+        "percentage=$2" \
+        "time_to_empty=$3" \
+        "time_to_full=$4"
+}
+
+# show_event STATE: the event `battery-notify show` uses in this state.
+show_event() {
+    case "$1" in
+    charging | pending-charge) printf 'show charging\n' ;;
+    full) printf 'show full\n' ;;
+    *) printf 'show discharging\n' ;;
+    esac
+}
+
+# decide_events PREV_STATE PREV_PERCENTAGE STATE PERCENTAGE RULES
+# Print the events that fire between two readings, one per line, in order:
+# plugged/unplugged, then a level, then full. Only events with a rule fire.
+#   - discharging N: on battery, the percentage drops across N;
+#   - charging N: on AC, the percentage rises across N;
+#   - across several levels at once, only the most severe fires (the lowest
+#     discharging level, the highest charging level).
+decide_events() {
+    local -r prev_state="$1" prev="$2" state="$3" percent="$4" rules="$5"
+    local from to level best="" event
+    from="$(power_source "$prev_state")"
+    to="$(power_source "$state")"
+    local -a events=()
+
+    if [[ "$from" == battery && "$to" == ac ]]; then
+        events+=(plugged)
+    elif [[ "$from" == ac && "$to" == battery ]]; then
+        events+=(unplugged)
+    fi
+
+    if [[ "$to" == battery ]]; then
+        for level in $(levels_of discharging "$rules"); do
+            if ((prev > level && level >= percent)) && [[ -z "$best" || "$level" -lt "$best" ]]; then
+                best="$level"
+            fi
+        done
+        [[ -z "$best" ]] || events+=("discharging $best")
+    elif [[ "$to" == ac ]]; then
+        for level in $(levels_of charging "$rules"); do
+            if ((prev < level && level <= percent)) && [[ -z "$best" || "$level" -gt "$best" ]]; then
+                best="$level"
+            fi
+        done
+        [[ -z "$best" ]] || events+=("charging $best")
+    fi
+
+    if [[ "$state" == full && "$prev_state" != full ]]; then
+        events+=(full)
+    fi
+
+    for event in "${events[@]}"; do
+        if rule_for "$event" "$rules" >/dev/null; then
+            printf '%s\n' "$event"
+        fi
+    done
+}
+
+# startup_events STATE PERCENTAGE RULES
+# At daemon start: on battery at or below a discharging level, the nearest one.
+startup_events() {
+    local -r state="$1" percent="$2" rules="$3"
+    local level best=""
+    [[ "$(power_source "$state")" == battery ]] || return 0
+    for level in $(levels_of discharging "$rules"); do
+        if ((level >= percent)) && [[ -z "$best" || "$level" -lt "$best" ]]; then
+            best="$level"
+        fi
+    done
+    [[ -z "$best" ]] || printf 'discharging %s\n' "$best"
+}
+
+# --- system ------------------------------------------------------------------
+
+# err MESSAGE: print an error message to stderr.
+err() {
+    printf 'battery-notify: %s\n' "$1" >&2
+}
+
+# --- core --------------------------------------------------------------------
+# Placeholders until the system layer exists (step 3 of the rewrite).
+
+core_show() {
+    err "'show' is not implemented yet"
+    return "$EXIT_SYSTEM"
+}
+
+core_status() {
+    err "'status' is not implemented yet"
+    return "$EXIT_SYSTEM"
+}
+
+core_daemon() {
+    err "'daemon' is not implemented yet"
+    return "$EXIT_SYSTEM"
+}
+
+# --- cli ---------------------------------------------------------------------
+
+# usage_error MESSAGE: report a usage error. Returns EXIT_USAGE, so callers can
+# write `check || usage_error "..." || return`.
+usage_error() {
+    err "$1"
+    printf "Try 'battery-notify --help' for more information.\n" >&2
+    return "$EXIT_USAGE"
+}
+
+cli_help() {
+    cat <<EOF
+Usage: battery-notify show
+       battery-notify status
+       battery-notify daemon
+       battery-notify --help | --version
+
+Battery notifications from UPower.
+
+Commands:
+  show     Notify the current battery state.
+  status   Print the battery state as key=value lines.
+  daemon   Notify battery events; run by battery-notify.service.
+
+Configuration: \$XDG_CONFIG_HOME/battery-notify/config
+(~/.config/battery-notify/config); built-in defaults without it.
+
+Exit codes: 0 success, 2 usage error, 3 config error, 4 system error.
+
+See 'man battery-notify' for details.
+EOF
+}
+
+# cli_no_args COMMAND ARG...
+# Succeeds if COMMAND was given no arguments.
+cli_no_args() {
+    local -r command="$1"
+    shift
+    (($# == 0)) || usage_error "'$command' takes no arguments"
+}
+
+main() {
+    (($# > 0)) || usage_error "missing command" || return
+    local -r command="$1"
+    shift
+    case "$command" in
+    show | status | daemon | --help | --version) ;;
+    *) usage_error "unknown command '$command'" || return ;;
+    esac
+    cli_no_args "$command" "$@" || return
+    case "$command" in
+    show) core_show ;;
+    status) core_status ;;
+    daemon) core_daemon ;;
+    --help) cli_help ;;
+    --version) printf 'battery-notify %s\n' "$VERSION" ;;
+    esac
+}
+
+# Run only when executed, not when sourced (the tests source this file).
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    set -euo pipefail
+    main "$@"
+fi

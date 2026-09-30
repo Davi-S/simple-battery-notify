@@ -46,9 +46,11 @@ stdout is data only; messages and errors go to stderr.
 
 ## Levels and events
 
-- **Levels have a direction** (fixes #1). A discharging level fires only while
-  discharging, when the battery drops to or below it; a charging level fires
-  only while charging, when it rises to or above it. A jump over several levels
+- **Levels have a direction** (fixes #1). A discharging level fires only on
+  battery, when the percentage drops across it; a charging level fires only on
+  AC, when it rises across it. "On AC" is UPower's charging, fully-charged and
+  pending-charge (held at a charge limit) states, because batteries often jump
+  to "fully charged" at 100% or stop at a limit. A jump over several levels
   still fires, but only in that level's direction.
 - **No commands.** 1.x could run a shell command at a level (e.g. hibernate at
   5%). Dropped: UPower's own critical action (`CriticalPowerAction` and
@@ -91,7 +93,7 @@ stdout is data only; messages and errors go to stderr.
 | Event | Fires when |
 |---|---|
 | `discharging N` | on battery, the level drops to N% or below |
-| `charging N` | charging, the level rises to N% or above |
+| `charging N` | on AC, the level rises to N% or above |
 | `full` | UPower reports "fully charged" (works with a charge limit) |
 | `plugged`, `unplugged` | the charger is connected or removed |
 | `show discharging`, `show charging`, `show full` | `battery-notify show`, by state |
