@@ -156,7 +156,7 @@ assert_notified() { # URGENCY EXPIRE_MS TITLE BODY
     assert_notified normal 2000 "Battery 58% · charging" "1:10 to full"
     fake_battery 4 100 0 0
     run "$BATTERY_NOTIFY" show
-    assert_notified normal 2000 "Battery full" ""
+    assert_notified normal 2000 "Battery 100% · full" ""
 }
 
 @test "show: a time UPower does not know yet" {
@@ -265,7 +265,14 @@ monitor_lines() {
     assert_status 4
     assert_called gdbus "${MONITOR_ARGS[@]}"
     assert_equal "$(calls busctl | wc -l)" 4 # every reading was seen
-    refute_called notify-send
+    # Only the charging levels, as normal time-to-full notifications; no
+    # low-battery warning (those are critical and say "Connect the charger").
+    assert_notified normal 2000 "Battery 12%" "1:23 to full"
+    assert_notified normal 2000 "Battery 16%" "1:06 to full"
+    assert_notified normal 2000 "Battery 21%" "0:50 to full"
+    assert_equal "$(calls notify-send | wc -l)" 3
+    [[ "$(calls notify-send)" != *critical* && "$(calls notify-send)" != *"Connect the charger"* ]] ||
+        fail "a low-battery warning while charging: $(calls notify-send)"
 }
 
 @test "daemon: plugged and unplugged" {
@@ -273,7 +280,7 @@ monitor_lines() {
     readings "2 31 9000 0" "1 31 0 5000" "2 31 9000 0"
     monitor_lines 2
     run "$BATTERY_NOTIFY" daemon
-    assert_notified normal 2000 "Charger connected" "Battery 31%"
+    assert_notified normal 2000 "Charger connected" "Battery 31% · 1:23 to full"
     assert_notified normal 2000 "Charger disconnected" "Battery 31% · 2:30 remaining"
     assert_equal "$(calls notify-send | wc -l)" 2
 }

@@ -71,18 +71,18 @@ title = Battery {level}% · charging
 message = {time} to full
 
 [show full]
-title = Battery full
+title = Battery {level}% · full
 
 [plugged]
 title = Charger connected
-message = Battery {level}%
+message = Battery {level}% · {time} to full
 
 [unplugged]
 title = Charger disconnected
 message = Battery {level}% · {time} remaining
 
 [full]
-title = Battery full
+title = Battery {level}% · full
 
 [discharging 90]
 title = Battery {level}%
@@ -130,6 +130,50 @@ message = Connect the charger: {level}% left
 urgency = critical
 title = Battery critical
 message = Connect the charger now: {level}% left
+
+[charging 5]
+title = Battery {level}%
+message = {time} to full
+
+[charging 10]
+title = Battery {level}%
+message = {time} to full
+
+[charging 15]
+title = Battery {level}%
+message = {time} to full
+
+[charging 20]
+title = Battery {level}%
+message = {time} to full
+
+[charging 30]
+title = Battery {level}%
+message = {time} to full
+
+[charging 40]
+title = Battery {level}%
+message = {time} to full
+
+[charging 50]
+title = Battery {level}%
+message = {time} to full
+
+[charging 60]
+title = Battery {level}%
+message = {time} to full
+
+[charging 70]
+title = Battery {level}%
+message = {time} to full
+
+[charging 80]
+title = Battery {level}%
+message = {time} to full
+
+[charging 90]
+title = Battery {level}%
+message = {time} to full
 '
 
 # --- values: configuration ---------------------------------------------------

@@ -325,3 +325,31 @@ usage_hint="Try 'battery-notify --help' for more information."
         fail "config/config.example differs from DEFAULT_CONFIG; regenerate it with:" \
             "  bash -c 'source src/battery-notify; printf %s \"\$DEFAULT_CONFIG\"' >config/config.example"
 }
+
+# --- the default config's content --------------------------------------------
+
+# default_rule EVENT: the default rule of EVENT, with | as the separator.
+default_rule() {
+    rule_for "$1" "$(parse_config "$DEFAULT_CONFIG")" | tr '\037' '|'
+}
+
+@test "defaults: plugged shows the time to full" {
+    assert_equal "$(default_rule plugged)" "plugged|normal|2000|Charger connected|Battery {level}% · {time} to full"
+}
+
+@test "defaults: full, and show when full, show the percentage" {
+    assert_equal "$(default_rule full)" "full|normal|2000|Battery {level}% · full|"
+    assert_equal "$(default_rule "show full")" "show full|normal|2000|Battery {level}% · full|"
+}
+
+@test "defaults: every discharging level has a normal charging level with the time to full" {
+    local rules level count=0
+    rules="$(parse_config "$DEFAULT_CONFIG")"
+    for level in $(levels_of discharging "$rules"); do
+        assert_equal "$(rule_for "charging $level" "$rules" | tr '\037' '|')" \
+            "charging $level|normal|2000|Battery {level}%|{time} to full"
+        count=$((count + 1))
+    done
+    assert_equal "$count" 11
+    assert_equal "$(levels_of charging "$rules" | wc -l)" 11
+}

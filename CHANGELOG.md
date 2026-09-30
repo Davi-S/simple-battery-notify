@@ -6,6 +6,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Default configuration (applies when you have no config file):
+  - "Charger connected" also shows the time to full.
+  - "Battery full" (and `show` when full) shows the percentage:
+    "Battery 100% · full".
+  - Every discharging level (90% down to 5%) now has a charging level too,
+    "Battery N%" with the time to full, always of normal urgency.
+
 ## [2.0.0] - 2026-09-29
 
 A ground-up rewrite, from Python to Bash. **Not compatible with 1.x**: the
