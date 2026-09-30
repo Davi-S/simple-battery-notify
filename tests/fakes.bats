@@ -109,3 +109,16 @@ readonly DEVICE=/org/freedesktop/UPower/devices/DisplayDevice
     refute_hanging gdbus # the failed check above killed it
     exec {fd}<&-
 }
+
+@test "concurrent calls are logged as whole lines" {
+    # The daemon runs gdbus in the background while calling busctl; the fakes
+    # must not interleave their log lines.
+    local i
+    for ((i = 0; i < 40; i++)); do
+        busctl --system get-property org.freedesktop.UPower "$DEVICE" org.freedesktop.UPower.Device State &
+        gdbus monitor --system --dest org.freedesktop.UPower &
+    done
+    wait
+    assert_equal "$(calls | wc -l)" 80
+    assert_equal "$(grep -cvxE '(busctl --system get-property org\.freedesktop\.UPower /org/freedesktop/UPower/devices/DisplayDevice org\.freedesktop\.UPower\.Device State|gdbus monitor --system --dest org\.freedesktop\.UPower)' "$FAKE_DIR/calls.log")" 0
+}

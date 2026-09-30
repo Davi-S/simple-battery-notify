@@ -19,11 +19,11 @@ set -euo pipefail
 
 name="${0##*/}"
 
-{
-    printf '%q' "$name"
-    (($# == 0)) || printf ' %q' "$@"
-    printf '\n'
-} >>"$FAKE_DIR/calls.log"
+# One write per line: fakes can run concurrently (e.g. gdbus in the
+# background while busctl runs), and several writes could interleave.
+entry="$(printf '%q' "$name")"
+(($# == 0)) || entry+="$(printf ' %q' "$@")"
+printf '%s\n' "$entry" >>"$FAKE_DIR/calls.log"
 
 rules_dir="$FAKE_DIR/rules/$name"
 [[ -d "$rules_dir" ]] || exit 0
