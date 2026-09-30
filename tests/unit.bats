@@ -317,3 +317,11 @@ usage_hint="Try 'battery-notify --help' for more information."
         assert_stderr "battery-notify: '$cmd' takes no arguments"$'\n'"$usage_hint"
     done
 }
+
+# --- config.example ----------------------------------------------------------
+
+@test "config/config.example is exactly the built-in defaults" {
+    [[ "$(<"$PROJECT_ROOT/config/config.example")"$'\n' == "$DEFAULT_CONFIG" ]] ||
+        fail "config/config.example differs from DEFAULT_CONFIG; regenerate it with:" \
+            "  bash -c 'source src/battery-notify; printf %s \"\$DEFAULT_CONFIG\"' >config/config.example"
+}

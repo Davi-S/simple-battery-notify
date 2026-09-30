@@ -1,51 +1,250 @@
 .TH BATTERY-NOTIFY 1 "2026-09-29" "simple-battery-notify" "User Commands"
 .SH NAME
-battery-notify \- battery notifications from UPower
+battery-notify \- customizable battery notifications from UPower
 .SH SYNOPSIS
-.B battery-notify
-.RB [ \-\-daemon ]
+.B battery-notify show
+.br
+.B battery-notify status
+.br
+.B battery-notify daemon
 .br
 .B battery-notify
 .BR \-\-help " | " \-\-version
 .SH DESCRIPTION
-Without options,
 .B battery-notify
-shows a notification with the current battery level and time remaining.
+shows desktop notifications about the battery: when the charger is connected
+or disconnected, when the battery reaches the levels you choose, when it is
+full, and on demand.
+It reads the battery from UPower, over D-Bus.
 .PP
-With
-.BR \-\-daemon ,
-it runs in the background, listens to UPower over D-Bus, and shows
-notifications when the charger is connected or disconnected and when the
-battery reaches the levels set in the configuration. It is meant to run as the
-systemd user service
-.BR battery-notify.service :
+It is meant to be scripted: output on stdout is data only, messages go to
+stderr, and every outcome has its own exit status.
+.SH COMMANDS
+.TP
+.B show
+Notify the current battery state now, using the
+.BR "[show discharging]" ,
+.B "[show charging]"
+or
+.B "[show full]"
+section. Meant for a keybinding.
+.TP
+.B status
+Print the battery state; see
+.BR "STATUS OUTPUT" .
+.TP
+.B daemon
+Watch UPower and notify battery events until stopped. Run by the systemd user
+service; see
+.BR SERVICE .
+.TP
+.B \-\-help
+Print a usage summary.
+.TP
+.B \-\-version
+Print the version.
+.SH STATUS OUTPUT
+.B status
+prints four
+.IB key = value
+lines:
+.TP
+.B state
+.BR charging ,
+.BR discharging ,
+.BR full ,
+.BR empty ,
+.B pending-charge
+(on AC but not charging, e.g. held at a charge limit),
+.B pending-discharge
+or
+.BR unknown .
+.TP
+.B percentage
+The battery level, rounded down.
+.TP
+.BR time_to_empty ", " time_to_full
+Seconds, as estimated by UPower; 0 when not applicable or not known yet.
+.PP
+Example:
+.PP
+.RS
+.nf
+state=discharging
+percentage=58
+time_to_empty=12960
+time_to_full=0
+.fi
+.RE
+.SH CONFIGURATION
+The configuration file is
+.IR $XDG_CONFIG_HOME/battery-notify/config ,
+or
+.I ~/.config/battery-notify/config
+when
+.B XDG_CONFIG_HOME
+is unset or not an absolute path.
+Without it, built-in defaults apply; they are installed as
+.I /usr/share/doc/simple-battery-notify/config.example
+to start from.
+The file replaces the defaults entirely.
+After editing it, restart the service:
+.PP
+.RS
+.nf
+systemctl \-\-user restart battery-notify.service
+.fi
+.RE
+.PP
+The file is read, never executed.
+Blank lines and lines starting with
+.B #
+are ignored.
+Each section names an event and sets its notification:
+.PP
+.RS
+.nf
+[discharging 15]
+urgency = critical
+title = Battery low
+message = Connect the charger: {level}% left
+.fi
+.RE
+.SS Events
+.TP
+.BI "[discharging " N ]
+On battery, the level drops to
+.IR N %
+or below (1 to 100).
+.TP
+.BI "[charging " N ]
+On AC, the level rises to
+.IR N %
+or above.
+.TP
+.B [full]
+UPower reports the battery fully charged.
+.TP
+.BR [plugged] ", " [unplugged]
+The charger is connected or disconnected.
+.TP
+.BR "[show discharging]" ", " "[show charging]" ", " "[show full]"
+.B battery-notify show
+in that state.
+.PP
+Levels have a direction: discharging levels never fire while on AC, and
+charging levels never fire on battery.
+If the level jumps over several levels at once (for example after a suspend),
+only the most severe fires: the lowest discharging level, or the highest
+charging level.
+When the daemon starts on battery at or below a
+.B critical
+discharging level, the nearest one fires once.
+An event without a section is silent.
+.SS Keys
+.TP
+.B title
+The notification's title. Required.
+.TP
+.B message
+Its body. Empty by default.
+.TP
+.B urgency
+.BR low ,
+.B normal
+(default) or
+.BR critical .
+.TP
+.B timeout
+How long it stays on screen, in milliseconds (0 to 9999999).
+Default 2000, or 0 (until dismissed) for critical notifications.
+.SS Placeholders
+In
+.B title
+and
+.BR message :
+.TP
+.B {level}
+The battery percentage.
+.TP
+.B {time}
+The time left, as h:mm: to empty on battery, to full while charging, or
+.B unknown
+while UPower is still estimating.
+.PP
+Any other
+.BI { word }
+is a mistake.
+.SS Mistakes
+Every command checks the file first and stops at the first mistake, printing
+.IB file : line :
+and the problem, with exit status 3.
+The daemon also sends a critical notification with the same text, since its
+stderr goes to the journal.
+.SH SERVICE
+The systemd user service runs
+.B battery-notify daemon
+with your desktop session (it is part of
+.BR graphical-session.target ):
 .PP
 .RS
 .nf
 systemctl \-\-user enable \-\-now battery-notify.service
 .fi
 .RE
-.SH OPTIONS
-.TP
-.BR \-d ", " \-\-daemon
-Run in the background.
-.TP
-.BR \-V ", " \-\-version
-Print the version.
-.TP
-.BR \-h ", " \-\-help
-Print usage information.
-.SH FILES
-.TP
-.I ~/.config/battery-notify/config.json
-Your configuration. If absent,
-.I /etc/battery-notify.json
-is used.
 .PP
-The format is described in the README, installed at
-.IR /usr/share/doc/simple-battery-notify/README.md .
+If UPower goes away, the daemon exits and systemd restarts it after 5 seconds.
+After a config mistake, or on a machine without a battery, it stays stopped.
+If your session does not activate
+.BR graphical-session.target ,
+start the daemon another way, for example from your compositor's autostart.
+.SH SUSPENDING AT A CRITICAL LEVEL
+.B battery-notify
+only notifies; it runs no commands.
+To suspend, hibernate or power off when the battery is nearly empty, use
+UPower's own action, which works even if your session has frozen:
+.B PercentageAction
+and
+.B CriticalPowerAction
+in
+.IR /etc/UPower/UPower.conf .
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 2
+Usage error.
+.TP
+.B 3
+Configuration mistake.
+.TP
+.B 4
+System error: UPower unreachable, the connection to it lost, or an unexpected
+answer.
+.TP
+.B 5
+No battery.
+.SH EXAMPLES
+Show the battery from a keybinding:
+.PP
+.RS
+.nf
+battery-notify show
+.fi
+.RE
+.PP
+The percentage, in a script:
+.PP
+.RS
+.nf
+battery-notify status | sed \-n 's/^percentage=//p'
+.fi
+.RE
 .SH SEE ALSO
 .BR upower (1),
-.BR notify-send (1)
+.BR UPower.conf (5),
+.BR notify-send (1),
+.BR systemctl (1)
 .SH BUGS
 Report issues at https://github.com/Davi-S/simple-battery-notify/issues

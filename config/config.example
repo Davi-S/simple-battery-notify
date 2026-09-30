@@ -1,0 +1,86 @@
+# battery-notify configuration.
+#
+# Copy to ~/.config/battery-notify/config and edit; then restart the service:
+#   systemctl --user restart battery-notify.service
+# The file replaces these defaults entirely. See "man battery-notify".
+#
+# Each section is an event:
+#   [discharging N]   on battery, the level drops to N% or below
+#   [charging N]      on AC, the level rises to N% or above
+#   [full]            UPower reports "fully charged"
+#   [plugged]         the charger is connected
+#   [unplugged]       the charger is disconnected
+#   [show discharging], [show charging], [show full]
+#                     "battery-notify show", by state
+# Keys: title (required), message, urgency (low, normal, critical; default
+# normal), timeout (milliseconds; default 2000, 0 for critical: stays until
+# dismissed). Placeholders: {level} (percentage), {time} (h:mm left).
+
+[show discharging]
+title = Battery {level}%
+message = {time} remaining
+
+[show charging]
+title = Battery {level}% · charging
+message = {time} to full
+
+[show full]
+title = Battery full
+
+[plugged]
+title = Charger connected
+message = Battery {level}%
+
+[unplugged]
+title = Charger disconnected
+message = Battery {level}% · {time} remaining
+
+[full]
+title = Battery full
+
+[discharging 90]
+title = Battery {level}%
+message = {time} remaining
+
+[discharging 80]
+title = Battery {level}%
+message = {time} remaining
+
+[discharging 70]
+title = Battery {level}%
+message = {time} remaining
+
+[discharging 60]
+title = Battery {level}%
+message = {time} remaining
+
+[discharging 50]
+title = Battery {level}%
+message = {time} remaining
+
+[discharging 40]
+title = Battery {level}%
+message = {time} remaining
+
+[discharging 30]
+title = Battery {level}%
+message = {time} remaining
+
+[discharging 20]
+title = Battery {level}%
+message = {time} remaining
+
+[discharging 15]
+urgency = critical
+title = Battery low
+message = Connect the charger: {level}% left
+
+[discharging 10]
+urgency = critical
+title = Battery low
+message = Connect the charger: {level}% left
+
+[discharging 5]
+urgency = critical
+title = Battery critical
+message = Connect the charger now: {level}% left
