@@ -153,10 +153,10 @@ assert_notified() { # URGENCY EXPIRE_MS TITLE BODY
 @test "show: charging, and full" {
     fake_battery 1 58 0 4200
     run "$BATTERY_NOTIFY" show
-    assert_notified normal 2000 "Battery 58% · charging" "1:10 to full"
+    assert_notified normal 2000 "Battery 58%" "1:10 to full"
     fake_battery 4 100 0 0
     run "$BATTERY_NOTIFY" show
-    assert_notified normal 2000 "Battery 100% · full" ""
+    assert_notified normal 2000 "Battery Full" "Battery 100%"
 }
 
 @test "show: a time UPower does not know yet" {

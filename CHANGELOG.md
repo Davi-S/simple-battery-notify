@@ -10,8 +10,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 - Default configuration (applies when you have no config file):
   - "Charger connected" also shows the time to full.
-  - "Battery full" (and `show` when full) shows the percentage:
-    "Battery 100% · full".
+  - "Battery Full" (and `show` when full) shows the percentage as its message.
+  - `show` while charging is titled "Battery N%", like on battery.
   - Every discharging level (90% down to 5%) now has a charging level too,
     "Battery N%" with the time to full, always of normal urgency.
 

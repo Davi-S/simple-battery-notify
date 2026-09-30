@@ -338,8 +338,8 @@ default_rule() {
 }
 
 @test "defaults: full, and show when full, show the percentage" {
-    assert_equal "$(default_rule full)" "full|normal|2000|Battery {level}% · full|"
-    assert_equal "$(default_rule "show full")" "show full|normal|2000|Battery {level}% · full|"
+    assert_equal "$(default_rule full)" "full|normal|2000|Battery Full|Battery {level}%"
+    assert_equal "$(default_rule "show full")" "show full|normal|2000|Battery Full|Battery {level}%"
 }
 
 @test "defaults: every discharging level has a normal charging level with the time to full" {

@@ -67,11 +67,12 @@ title = Battery {level}%
 message = {time} remaining
 
 [show charging]
-title = Battery {level}% · charging
+title = Battery {level}%
 message = {time} to full
 
 [show full]
-title = Battery {level}% · full
+title = Battery Full
+message = Battery {level}%
 
 [plugged]
 title = Charger connected
@@ -82,7 +83,8 @@ title = Charger disconnected
 message = Battery {level}% · {time} remaining
 
 [full]
-title = Battery {level}% · full
+title = Battery Full
+message = Battery {level}%
 
 [discharging 90]
 title = Battery {level}%
