@@ -263,16 +263,23 @@ events() {
 
 # --- startup_events ----------------------------------------------------------
 
+STARTUP_CONFIG=$'[discharging 20]\ntitle = a\n[discharging 15]\nurgency = critical\ntitle = a\n[discharging 10]\nurgency = critical\ntitle = a'
+
 startup() {
     local rules
-    rules="$(parse_config "$LEVELS_CONFIG")"
+    rules="$(parse_config "$STARTUP_CONFIG")"
     startup_events "$1" "$2" "$rules" | paste -sd, -
 }
 
-@test "startup_events: on battery at or below a level, the nearest one fires" {
+@test "startup_events: on battery at or below a critical level, the nearest one fires" {
     assert_equal "$(startup discharging 8)" "discharging 10"
     assert_equal "$(startup discharging 12)" "discharging 15"
     assert_equal "$(startup discharging 15)" "discharging 15"
+}
+
+@test "startup_events: levels that are not critical never fire at start-up" {
+    assert_equal "$(startup discharging 17)" ""
+    assert_equal "$(startup discharging 20)" ""
 }
 
 @test "startup_events: nothing above every level, or when not on battery" {

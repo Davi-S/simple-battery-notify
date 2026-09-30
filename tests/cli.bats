@@ -121,14 +121,14 @@ assert_notified() { # URGENCY EXPIRE_MS TITLE BODY
     done
 }
 
-@test "status: no battery is a system error" {
+@test "status: no battery has its own exit code" {
     fake_battery 0 0 0 0 false 0
     run --separate-stderr "$BATTERY_NOTIFY" status
-    assert_status 4
+    assert_status 5
     assert_stderr "battery-notify: no battery found"
     fake_battery 2 58 0 0 true 1 # a line power device, not a battery
     run "$BATTERY_NOTIFY" status
-    assert_status 4
+    assert_status 5
 }
 
 @test "status: a config error fails before reading the battery" {
@@ -216,4 +216,137 @@ assert_notified() { # URGENCY EXPIRE_MS TITLE BODY
     run --separate-stderr "$BATTERY_NOTIFY" show
     assert_status 4
     assert_stderr "battery-notify: could not send a notification"
+}
+
+# --- daemon ------------------------------------------------------------------
+
+readonly MONITOR_ARGS=(monitor --system --dest org.freedesktop.UPower
+    --object-path /org/freedesktop/UPower/devices/DisplayDevice)
+readonly CHANGED="/org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Properties.PropertiesChanged ('org.freedesktop.UPower.Device', {'Percentage': <14.0>}, @as [])"
+
+# readings "STATE PERCENT TTE TTF" ...: successive UPower answers; the last repeats.
+readings() {
+    local -r all=("$@")
+    local i fields
+    read -ra fields <<<"${all[-1]}"
+    fake_battery "${fields[@]}"
+    for ((i = ${#all[@]} - 2; i >= 0; i--)); do
+        read -ra fields <<<"${all[i]}"
+        fake busctl --args "$READ_ARGS" --once \
+            --stdout "b true"$'\n'"u 2"$'\n'"u ${fields[0]}"$'\n'"d ${fields[1]}"$'\n'"x ${fields[2]}"$'\n'"x ${fields[3]}"
+    done
+}
+
+# monitor_lines N: the fake monitor prints N change lines, then ends (as if
+# UPower's bus connection was lost), which ends the daemon.
+monitor_lines() {
+    local out="" i
+    for ((i = 0; i < $1; i++)); do
+        out+="${out:+$'\n'}$CHANGED"
+    done
+    fake gdbus --stdout "$out"
+}
+
+@test "daemon: notifies a level crossed while discharging" {
+    readings "2 50 18000 0" "2 14 5000 0"
+    monitor_lines 1
+    run --separate-stderr "$BATTERY_NOTIFY" daemon
+    assert_status 4
+    assert_stderr "battery-notify: lost the connection to UPower"
+    assert_called gdbus "${MONITOR_ARGS[@]}"
+    assert_notified critical 0 "Battery low" "Connect the charger: 14% left"
+    assert_equal "$(calls notify-send | wc -l)" 1
+}
+
+@test "daemon: issue #1: charging from a low level warns about nothing low" {
+    readings "1 8 0 6000" "1 12 0 5000" "1 16 0 4000" "1 21 0 3000"
+    monitor_lines 3
+    run "$BATTERY_NOTIFY" daemon
+    assert_status 4
+    assert_called gdbus "${MONITOR_ARGS[@]}"
+    assert_equal "$(calls busctl | wc -l)" 4 # every reading was seen
+    refute_called notify-send
+}
+
+@test "daemon: plugged and unplugged" {
+    # 31%: above the 30% level, so the start-up rule stays quiet.
+    readings "2 31 9000 0" "1 31 0 5000" "2 31 9000 0"
+    monitor_lines 2
+    run "$BATTERY_NOTIFY" daemon
+    assert_notified normal 2000 "Charger connected" "Battery 31%"
+    assert_notified normal 2000 "Charger disconnected" "Battery 31% · 2:30 remaining"
+    assert_equal "$(calls notify-send | wc -l)" 2
+}
+
+@test "daemon: at start-up on battery at a low level, the nearest level fires" {
+    readings "2 8 2400 0"
+    monitor_lines 0
+    run "$BATTERY_NOTIFY" daemon
+    assert_notified critical 0 "Battery low" "Connect the charger: 8% left"
+    assert_equal "$(calls notify-send | wc -l)" 1
+}
+
+@test "daemon: at start-up on battery at an ordinary level, nothing fires" {
+    readings "2 58 12960 0"
+    monitor_lines 0
+    run "$BATTERY_NOTIFY" daemon
+    assert_called busctl "${READ_ARGV[@]}"
+    refute_called notify-send
+}
+
+@test "daemon: at start-up on AC, nothing fires" {
+    readings "1 8 0 6000"
+    monitor_lines 0
+    run "$BATTERY_NOTIFY" daemon
+    assert_called gdbus "${MONITOR_ARGS[@]}"
+    assert_called busctl "${READ_ARGV[@]}"
+    refute_called notify-send
+}
+
+@test "daemon: a change line with nothing new notifies nothing" {
+    readings "1 50 0 3000"
+    monitor_lines 3
+    run "$BATTERY_NOTIFY" daemon
+    refute_called notify-send
+    assert_equal "$(calls busctl | wc -l)" 4 # start-up, then one per line
+}
+
+@test "daemon: a config error is notified once, and nothing else runs" {
+    user_config $'[discharging 15]
+titel = a'
+    run --separate-stderr "$BATTERY_NOTIFY" daemon
+    assert_status 3
+    assert_stderr "battery-notify: $HOME/.config/battery-notify/config:2: unknown key 'titel'"
+    assert_notified critical 0 "battery-notify: config error" "$HOME/.config/battery-notify/config:2: unknown key 'titel'"
+    refute_called gdbus
+    refute_called busctl
+}
+
+@test "daemon: no battery has its own exit code, and stops the monitor" {
+    fake_battery 0 0 0 0 false 0
+    fake gdbus --hang
+    run --separate-stderr "$BATTERY_NOTIFY" daemon
+    assert_status 5
+    assert_stderr "battery-notify: no battery found"
+    refute_hanging gdbus
+}
+
+@test "daemon: UPower failing mid-way is a system error, and stops the monitor" {
+    fake busctl --args "$READ_ARGS" --exit 1
+    fake busctl --args "$READ_ARGS" --once --stdout $'b true\nu 2\nu 2\nd 50\nx 18000\nx 0'
+    fake gdbus --stdout "$CHANGED" --hang
+    run --separate-stderr "$BATTERY_NOTIFY" daemon
+    assert_status 4
+    assert_stderr "battery-notify: could not read the battery from UPower"
+    refute_hanging gdbus
+}
+
+@test "daemon: a failed notification does not stop the daemon" {
+    readings "2 50 18000 0" "2 14 5000 0" "2 9 3000 0"
+    fake notify-send --exit 1
+    monitor_lines 2
+    run --separate-stderr "$BATTERY_NOTIFY" daemon
+    assert_status 4
+    assert_equal "$(calls notify-send | wc -l)" 2
+    assert_stderr $'battery-notify: could not send a notification\nbattery-notify: could not send a notification\nbattery-notify: lost the connection to UPower'
 }

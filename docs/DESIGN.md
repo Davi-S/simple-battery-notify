@@ -140,18 +140,28 @@ time_to_full=0
 | 0 | Success (`status`: the battery could be read; the state is in the output) |
 | 2 | Usage error |
 | 3 | Config error |
-| 4 | System error: UPower unreachable, no battery |
+| 4 | System error: UPower unreachable, connection lost, unexpected answer |
+| 5 | No battery (e.g. a desktop) |
 
 ## Daemon behaviour
 
-- **Start-up:** if already on battery at or below a discharging level (logging
-  in at 8%), that level fires once.
+- **Start-up:** if already on battery at or below a *critical* discharging level
+  (logging in at 8%), the nearest one fires once. Levels that are not critical
+  stay quiet: with status levels every 10%, every login on battery would notify.
 - **Several levels crossed at once** (e.g. resuming at 12% after 40%): only the
   most severe fires: the lowest for discharging, the highest for charging.
-- **UPower restarts or the monitor dies:** the daemon exits with an error and
-  systemd restarts it (`Restart=on-failure`).
-- **No battery** (a desktop): the daemon exits with "no battery", and the
-  service does not restart it (`RestartPreventExitStatus`).
+- **UPower restarts or the monitor dies:** the daemon exits 4 and systemd
+  restarts it after 5 s (`Restart=on-failure`, `RestartSec=5`).
+- **No battery** (exit 5), **config error** (exit 3, notified once) and usage
+  errors (exit 2) are not restarted (`RestartPreventExitStatus=2 3 5`): fix the
+  config, then restart the service.
+- **A failed notification** is logged; the daemon keeps watching.
+- **The service** is `PartOf=`, `After=` and `WantedBy=graphical-session.target`:
+  it starts and stops with the desktop session (notifications need one), not
+  for SSH logins. Sessions that don't activate that target (e.g. a compositor
+  started without a session manager) need it started another way.
+- **Measured:** ~11 MB (Bash ~4.4 MB + `gdbus monitor` ~6.9 MB), against ~20 MB
+  for 1.x.
 
 ## Open
 

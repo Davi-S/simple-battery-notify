@@ -32,6 +32,7 @@ readonly VERSION
 readonly EXIT_USAGE=2
 readonly EXIT_CONFIG=3
 readonly EXIT_SYSTEM=4
+readonly EXIT_NO_BATTERY=5
 
 # Separates the fields of a parsed config rule: EVENT URGENCY TIMEOUT TITLE
 # MESSAGE. The ASCII unit separator, which the parser refuses in values.
@@ -429,15 +430,27 @@ decide_events() {
     done
 }
 
+# rule_urgency RULE: the urgency field of a rule.
+rule_urgency() {
+    local event urgency rest
+    IFS="$SEP" read -r event urgency rest <<<"$1"
+    printf '%s\n' "$urgency"
+}
+
 # startup_events STATE PERCENTAGE RULES
-# At daemon start: on battery at or below a discharging level, the nearest one.
+# At daemon start: on battery at or below a *critical* discharging level, the
+# nearest one. Other levels (e.g. status every 10%) stay quiet, or every login
+# on battery would notify.
 startup_events() {
     local -r state="$1" percent="$2" rules="$3"
-    local level best=""
+    local level best="" rule
     [[ "$(power_source "$state")" == battery ]] || return 0
     for level in $(levels_of discharging "$rules"); do
         if ((level >= percent)) && [[ -z "$best" || "$level" -lt "$best" ]]; then
-            best="$level"
+            rule="$(rule_for "discharging $level" "$rules")"
+            if [[ "$(rule_urgency "$rule")" == critical ]]; then
+                best="$level"
+            fi
         fi
     done
     [[ -z "$best" ]] || printf 'discharging %s\n' "$best"
@@ -528,9 +541,9 @@ sys_read_battery() {
     battery="$(parse_battery "$answer")" || {
         if (($? == 2)); then
             err "no battery found"
-        else
-            err "unexpected answer from UPower"
+            return "$EXIT_NO_BATTERY"
         fi
+        err "unexpected answer from UPower"
         return "$EXIT_SYSTEM"
     }
     printf '%s\n' "$battery"
@@ -542,6 +555,45 @@ sys_notify() {
         err "could not send a notification"
         return "$EXIT_SYSTEM"
     }
+}
+
+# sys_notify_config_error
+# Notify the config mistake (once), for the daemon, whose stderr nobody sees.
+sys_notify_config_error() {
+    local problem
+    problem="$(sys_load_rules 2>&1 >/dev/null)"
+    sys_notify critical 0 "battery-notify: config error" "${problem#battery-notify: }"
+}
+
+# sys_monitor_open FD_VAR PID_VAR
+# Start watching UPower's display device for changes. Returns the stream's file
+# descriptor in FD_VAR and the watcher's PID in PID_VAR (a nameref, so the
+# descriptor stays open in the calling shell). Its own locals start with
+# `monitor_`, so they can't shadow the caller's variables.
+# shellcheck disable=SC2034 # assigning to the namerefs is the return value
+sys_monitor_open() {
+    local -n monitor_fd_out="$1" monitor_pid_out="$2"
+    local monitor_fd
+    exec {monitor_fd}< <(exec gdbus monitor --system --dest org.freedesktop.UPower --object-path "$UPOWER_DEVICE")
+    monitor_pid_out=$!
+    monitor_fd_out="$monitor_fd"
+}
+
+# sys_monitor_next FD
+# Wait for the next change line. Fails when the stream ends: gdbus lost UPower.
+sys_monitor_next() {
+    local line
+    read -r -u "$1" line || {
+        err "lost the connection to UPower"
+        return "$EXIT_SYSTEM"
+    }
+}
+
+# sys_monitor_close FD PID
+sys_monitor_close() {
+    local fd="$1"
+    kill "$2" 2>/dev/null || true
+    exec {fd}<&-
 }
 
 # --- core --------------------------------------------------------------------
@@ -566,17 +618,64 @@ core_show() {
     notify_rule "$rule" "$state" "$percent" "$to_empty" "$to_full"
 }
 
+# notify_event EVENT RULES STATE PERCENTAGE TIME_TO_EMPTY TIME_TO_FULL
+# Send EVENT's notification. A failure is reported, not fatal: the daemon
+# keeps watching.
+notify_event() {
+    local rule
+    rule="$(rule_for "$1" "$2")" || return 0
+    notify_rule "$rule" "$3" "$4" "$5" "$6" || true
+}
+
+# core_daemon
+# Run by battery-notify.service: notify battery events until UPower goes away.
+core_daemon() {
+    local rules fd pid battery state percent to_empty to_full event
+    local prev_state prev_percent
+    local -i code=0
+    rules="$(sys_load_rules)" || {
+        code=$?
+        if ((code == EXIT_CONFIG)); then
+            sys_notify_config_error || true
+        fi
+        return "$code"
+    }
+
+    # Started before the first reading, so no change can be missed.
+    sys_monitor_open fd pid
+    if battery="$(sys_read_battery)"; then
+        read -r state percent to_empty to_full <<<"$battery"
+        while IFS= read -r event; do
+            [[ -z "$event" ]] || notify_event "$event" "$rules" "$state" "$percent" "$to_empty" "$to_full"
+        done <<<"$(startup_events "$state" "$percent" "$rules")"
+
+        while sys_monitor_next "$fd" || {
+            code=$?
+            false
+        }; do
+            prev_state="$state" prev_percent="$percent"
+            battery="$(sys_read_battery)" || {
+                code=$?
+                break
+            }
+            read -r state percent to_empty to_full <<<"$battery"
+            while IFS= read -r event; do
+                [[ -z "$event" ]] || notify_event "$event" "$rules" "$state" "$percent" "$to_empty" "$to_full"
+            done <<<"$(decide_events "$prev_state" "$prev_percent" "$state" "$percent" "$rules")"
+        done
+    else
+        code=$?
+    fi
+    sys_monitor_close "$fd" "$pid"
+    return "$code"
+}
+
 core_status() {
     local battery state percent to_empty to_full
     sys_load_rules >/dev/null || return
     battery="$(sys_read_battery)" || return
     read -r state percent to_empty to_full <<<"$battery"
     format_status "$state" "$percent" "$to_empty" "$to_full"
-}
-
-core_daemon() {
-    err "'daemon' is not implemented yet"
-    return "$EXIT_SYSTEM"
 }
 
 # --- cli ---------------------------------------------------------------------
@@ -606,7 +705,8 @@ Commands:
 Configuration: \$XDG_CONFIG_HOME/battery-notify/config
 (~/.config/battery-notify/config); built-in defaults without it.
 
-Exit codes: 0 success, 2 usage error, 3 config error, 4 system error.
+Exit codes: 0 success, 2 usage error, 3 config error, 4 system error,
+            5 no battery.
 
 See 'man battery-notify' for details.
 EOF
