@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-29
+
 ### Changed
 
 - Default configuration (applies when you have no config file):
