@@ -9,9 +9,12 @@ BASHCOMPDIR = $(DESTDIR)$(PREFIX)/share/bash-completion/completions
 USERUNITDIR = $(DESTDIR)$(PREFIX)/lib/systemd/user
 CONFDIR     = $(DESTDIR)$(SYSCONFDIR)
 
-SHELL_SOURCES = completions/battery-notify.bash scripts/*.sh
+SHELL_SOURCES = completions/battery-notify.bash scripts/*.sh \
+                tests/helpers.bash tests/fakes/fake tests/*.bats
 
-.PHONY: all install uninstall check
+BATS ?= bats
+
+.PHONY: all install uninstall check test
 
 all:
 	@echo "Nothing to build. Run 'make install' (PREFIX=$(PREFIX))."
@@ -39,3 +42,7 @@ uninstall:
 check:
 	shellcheck -x $(SHELL_SOURCES)
 	shfmt -d $(SHELL_SOURCES)
+
+# Run the test suite (needs bats: pacman -S bash-bats).
+test:
+	$(BATS) tests

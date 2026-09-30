@@ -10,7 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Install shellcheck and shfmt
-        run: sudo apt-get update && sudo apt-get install -y shellcheck shfmt
+      - name: Install shellcheck, shfmt and bats
+        run: sudo apt-get update && sudo apt-get install -y shellcheck shfmt bats
       - name: shellcheck + shfmt
         run: make check
+      - name: Tests
+        run: make test

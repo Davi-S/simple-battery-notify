@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#
+# Generic fake for external commands. tests/helpers.bash links this file under
+# each faked command's name (systemctl, systemd-run, ...).
+#
+# On every call it:
+#   1. appends the call to $FAKE_DIR/calls.log, one line per call, the command
+#      name and each argument quoted with printf %q;
+#   2. finds the most recently registered rule for this command whose pattern
+#      matches the arguments, prints its stdout and exits with its code;
+#      a "once" rule is deleted after its first use; a "hang" rule keeps
+#      running after printing, like a monitor, until it is killed, and
+#      records its PID in $FAKE_DIR/<name>.hanging;
+#   3. with no matching rule, prints nothing and exits 0.
+#
+# Rules are registered by the `fake` helper in tests/helpers.bash.
+
+set -euo pipefail
+
+name="${0##*/}"
+
+{
+    printf '%q' "$name"
+    (($# == 0)) || printf ' %q' "$@"
+    printf '\n'
+} >>"$FAKE_DIR/calls.log"
+
+rules_dir="$FAKE_DIR/rules/$name"
+[[ -d "$rules_dir" ]] || exit 0
+
+# Rules are numbered 000, 001, ...; check the newest first.
+mapfile -t rules < <(find "$rules_dir" -mindepth 1 -maxdepth 1 -type d | sort -r)
+for rule in "${rules[@]}"; do
+    pattern="$(<"$rule/pattern")"
+    # shellcheck disable=SC2053 # $pattern is a glob on purpose
+    if [[ "$*" == $pattern ]]; then
+        cat "$rule/stdout"
+        code="$(<"$rule/exit")"
+        [[ ! -e "$rule/once" ]] || rm -r "$rule"
+        if [[ -e "$rule/hang" ]]; then
+            # Recorded so tests can check the process was stopped. tail is not
+            # faked; exec keeps the PID, so killing that PID stops the hang.
+            printf '%s\n' "$$" >>"$FAKE_DIR/$name.hanging"
+            exec tail -f /dev/null
+        fi
+        exit "$code"
+    fi
+done
