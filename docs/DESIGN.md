@@ -59,8 +59,48 @@ stdout is data only; messages and errors go to stderr.
 
 - **Fully customizable,** as in 1.x: which events notify, and each one's title,
   message, urgency and timeout.
-- **Format:** simple `key=value` text, read by a strict Bash parser; never
-  executed as code, and no `jq`. The 1.x JSON config is not read.
+- **One file, the XDG way:** `$XDG_CONFIG_HOME/battery-notify/config`
+  (default `~/.config/battery-notify/config`). No `/etc` file: this is a
+  per-user service. Without the file, built-in defaults apply (the notifications
+  below); with it, the file replaces the defaults entirely (no merging). An
+  example is installed at `/usr/share/doc/simple-battery-notify/config.example`.
+  After editing, restart the service.
+- **Format:** INI-like sections, read by a strict Bash parser; never executed as
+  code, and no `jq`. A section names an event; `key = value` lines follow.
+
+  ```
+  [discharging 15]
+  urgency = critical
+  title = Battery low
+  message = Connect the charger: {level}% left
+
+  [charging 100]
+  title = Battery full
+
+  [plugged]
+  title = Charger connected
+  message = {level}% · {time} to full
+  ```
+- **Errors:** every command checks the config first and fails with the line
+  (`battery-notify: config line 12: unknown key 'titel'`). The daemon also sends
+  one critical notification about it, since it runs where nobody sees stderr.
+- **1.x's JSON config is not read,** and nothing mentions it: it is simply gone.
+
+### Events
+
+| Event | Fires when |
+|---|---|
+| `discharging N` | on battery, the level drops to N% or below |
+| `charging N` | charging, the level rises to N% or above |
+| `full` | UPower reports "fully charged" (works with a charge limit) |
+| `plugged`, `unplugged` | the charger is connected or removed |
+| `show discharging`, `show charging`, `show full` | `battery-notify show`, by state |
+
+- An event with no section is silent. `show` with no matching section fails with
+  a config error.
+- Placeholders in messages: `{level}` (percentage) and `{time}` (`3:36`, or
+  `unknown` while UPower is still estimating). An unknown placeholder is a
+  config error.
 
 ## Default notifications
 
@@ -79,12 +119,33 @@ As in expresso and decaf: one file, `src/battery-notify`, in layers
 fakes (`gdbus`, `busctl`, `notify-send`, …), and a local `tests/integration.sh`
 against the real UPower.
 
+## `status` and exit codes
+
+```
+state=discharging     # charging, discharging, full, empty, pending-charge, pending-discharge, unknown
+percentage=58
+time_to_empty=12960   # seconds; 0 when not applicable or not known yet
+time_to_full=0
+```
+
+| Code | Meaning |
+|---|---|
+| 0 | Success (`status`: the battery could be read; the state is in the output) |
+| 2 | Usage error |
+| 3 | Config error |
+| 4 | System error: UPower unreachable, no battery |
+
+## Daemon behaviour
+
+- **Start-up:** if already on battery at or below a discharging level (logging
+  in at 8%), that level fires once.
+- **Several levels crossed at once** (e.g. resuming at 12% after 40%): only the
+  most severe fires: the lowest for discharging, the highest for charging.
+- **UPower restarts or the monitor dies:** the daemon exits with an error and
+  systemd restarts it (`Restart=on-failure`).
+- **No battery** (a desktop): the daemon exits with "no battery", and the
+  service does not restart it (`RestartPreventExitStatus`).
+
 ## Open
 
-- Config format for per-event rules, its location, precedence and error handling.
-- The set of events, and message placeholders.
-- `status` keys and exit codes.
-- Daemon edge cases: start-up, several levels crossed at once, UPower restarts,
-  no battery.
-- Migration hint for the 1.x JSON config.
-- The menu does not apply (this tool has none).
+- Nothing for 2.0.
