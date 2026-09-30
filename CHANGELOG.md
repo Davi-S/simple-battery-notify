@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-29
+
 A ground-up rewrite, from Python to Bash. **Not compatible with 1.x**: the
 commands, the configuration file and its format all changed.
 
