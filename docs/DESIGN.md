@@ -14,6 +14,11 @@ This file records decisions. Open items are listed at the end.
   Python and loading its D-Bus libraries. Reading UPower with `busctl` takes
   ~7 ms and `notify-send` ~31 ms, so Bash can show it in ~40 ms. (Measured
   2026-09-29.) The daemon also holds ~20 MB for the Python runtime.
+- **Measured with the rewrite** (same machine): `show` takes ~74 ms, against
+  ~290 ms for 1.x, about 4× faster; ~31 ms of it is `notify-send` itself, and
+  ~18 ms parsing the config. `status` takes ~39 ms. The parser returns each
+  section's rule through a nameref instead of `$(...)`: a fork per section had
+  cost ~30 ms.
 
 ## Goals
 

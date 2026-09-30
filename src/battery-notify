@@ -8,7 +8,7 @@
 #   cli     argv → validated values; prints messages; maps results to exit codes
 #   core    show, status, daemon
 #   system  the only code that runs external commands or reads files; validates
-#           what they return and reports its own failures (not written yet)
+#           what they return and reports its own failures
 #   values  pure functions: no I/O besides printing the result
 #
 # Conventions:
@@ -21,14 +21,15 @@
 #     a code, and the cli turns it into a message.
 #   - Never do arithmetic on an unvalidated string: Bash evaluates it as an
 #     expression, which can run commands. Validate with a regex first.
+#   - Exception, for speed: a function called in a loop may return its result
+#     in a variable named by its first argument (`local -n`), because `$(...)`
+#     forks a process. Marked "Returns in OUT" where used.
 
 VERSION="1.0.5"
 readonly VERSION
 
 # Exit codes. Each has one meaning across all commands.
 readonly EXIT_USAGE=2
-# TODO(rewrite step 3): drop this directive once the system layer uses it.
-# shellcheck disable=SC2034
 readonly EXIT_CONFIG=3
 readonly EXIT_SYSTEM=4
 
@@ -36,9 +37,11 @@ readonly EXIT_SYSTEM=4
 # MESSAGE. The ASCII unit separator, which the parser refuses in values.
 readonly SEP=$'\x1f'
 
+# UPower's combined battery, and the properties read from it, in this order.
+readonly UPOWER_DEVICE=/org/freedesktop/UPower/devices/DisplayDevice
+readonly UPOWER_PROPERTIES=(IsPresent Type State Percentage TimeToEmpty TimeToFull)
+
 # Used when the user has no config file. Also installed as config.example.
-# TODO(rewrite step 3): drop this directive once the system layer uses it.
-# shellcheck disable=SC2034
 readonly DEFAULT_CONFIG='# battery-notify configuration.
 #
 # Copy to ~/.config/battery-notify/config and edit; then restart the service:
@@ -156,20 +159,22 @@ check_text() {
     done
 }
 
-# config_rule LINE EVENT TITLE MESSAGE URGENCY TIMEOUT
-# Print the rule of a finished section, with defaults filled in. Fails, printing
-# "LINE: problem", if the section has no title.
+# config_rule OUT LINE EVENT TITLE MESSAGE URGENCY TIMEOUT
+# The rule of a finished section, with defaults filled in. Returns in OUT.
+# Fails, with "LINE: problem" in OUT, if the section has no title.
+# shellcheck disable=SC2034 # assigning to the nameref `out` is the return value
 config_rule() {
-    local -r line="$1" event="$2" title="$3" message="$4" urgency="${5:-normal}"
-    local timeout="$6"
+    local -n out="$1"
+    local -r line="$2" event="$3" title="$4" message="$5" urgency="${6:-normal}"
+    local timeout="$7"
     if [[ -z "$title" ]]; then
-        printf '%s: section [%s] has no title\n' "$line" "$event"
+        out="$line: section [$event] has no title"
         return 1
     fi
     if [[ -z "$timeout" ]]; then
         if [[ "$urgency" == critical ]]; then timeout=0; else timeout=2000; fi
     fi
-    printf '%s\n' "$event$SEP$urgency$SEP$timeout$SEP$title$SEP$message"
+    out="$event$SEP$urgency$SEP$timeout$SEP$title$SEP$message"
 }
 
 # parse_config TEXT
@@ -191,7 +196,7 @@ parse_config() {
 
         if [[ "$line" =~ ^\[(.*)\]$ ]]; then
             if [[ -n "$event" ]]; then
-                rule="$(config_rule "$event_line" "$event" "$title" "$message" "$urgency" "$timeout")" || {
+                config_rule rule "$event_line" "$event" "$title" "$message" "$urgency" "$timeout" || {
                     printf '%s\n' "$rule"
                     return 1
                 }
@@ -260,7 +265,7 @@ parse_config() {
     done <<<"$1"
 
     if [[ -n "$event" ]]; then
-        rule="$(config_rule "$event_line" "$event" "$title" "$message" "$urgency" "$timeout")" || {
+        config_rule rule "$event_line" "$event" "$title" "$message" "$urgency" "$timeout" || {
             printf '%s\n' "$rule"
             return 1
         }
@@ -438,6 +443,34 @@ startup_events() {
     [[ -z "$best" ]] || printf 'discharging %s\n' "$best"
 }
 
+# parse_battery TEXT
+# Parse busctl's answer for UPOWER_PROPERTIES. Prints "STATE PERCENTAGE
+# TIME_TO_EMPTY TIME_TO_FULL", with the percentage rounded down. Fails (1) if
+# the answer is malformed, and (2) if the device is not a present battery.
+parse_battery() {
+    local -a lines
+    mapfile -t lines <<<"$1"
+    ((${#lines[@]} == 6)) || return 1
+    local -r time_re='^x (0|[1-9][0-9]{0,11})$'
+    [[ "${lines[0]}" =~ ^b\ (true|false)$ ]] || return 1
+    local -r present="${BASH_REMATCH[1]}"
+    [[ "${lines[1]}" =~ ^u\ ([0-9]+)$ ]] || return 1
+    local -r type="${BASH_REMATCH[1]}"
+    [[ "${lines[2]}" =~ ^u\ ([0-9])$ ]] || return 1
+    local state
+    state="$(state_name "${BASH_REMATCH[1]}")" || return 1
+    [[ "${lines[3]}" =~ ^d\ (0|[1-9][0-9]{0,2})(\.[0-9]+)?$ ]] || return 1
+    local -r percent="${BASH_REMATCH[1]}"
+    ((percent <= 100)) || return 1
+    [[ "${lines[4]}" =~ $time_re ]] || return 1
+    local -r to_empty="${BASH_REMATCH[1]}"
+    [[ "${lines[5]}" =~ $time_re ]] || return 1
+    local -r to_full="${BASH_REMATCH[1]}"
+    # UPower's Device.Type 2 is a battery.
+    [[ "$present" == true && "$type" == 2 ]] || return 2
+    printf '%s %s %s %s\n' "$state" "$percent" "$to_empty" "$to_full"
+}
+
 # --- system ------------------------------------------------------------------
 
 # err MESSAGE: print an error message to stderr.
@@ -445,17 +478,100 @@ err() {
     printf 'battery-notify: %s\n' "$1" >&2
 }
 
+# sys_config_path: the config file's path, following the XDG specification
+# (XDG_CONFIG_HOME if set and absolute, else ~/.config). It may not exist.
+sys_config_path() {
+    local dir="${XDG_CONFIG_HOME-}"
+    [[ "$dir" == /* ]] || dir="$HOME/.config"
+    printf '%s\n' "$dir/battery-notify/config"
+}
+
+# sys_load_rules
+# Print the parsed rules of the user's config file, or of DEFAULT_CONFIG when
+# there is none. Reports a config mistake as FILE:LINE: problem.
+sys_load_rules() {
+    local path text rules
+    path="$(sys_config_path)"
+    if [[ ! -e "$path" ]]; then
+        parse_config "$DEFAULT_CONFIG"
+        return
+    fi
+    if [[ ! -f "$path" || ! -r "$path" ]] || ! text="$(<"$path")"; then
+        err "cannot read $path"
+        return "$EXIT_SYSTEM"
+    fi
+    rules="$(parse_config "$text")" || {
+        err "$path:$rules"
+        return "$EXIT_CONFIG"
+    }
+    printf '%s\n' "$rules"
+}
+
+# sys_rule_for EVENT RULES
+# Print EVENT's rule; reports a config mistake if the config has none.
+sys_rule_for() {
+    rule_for "$1" "$2" || {
+        err "$(sys_config_path): no [$1] section"
+        return "$EXIT_CONFIG"
+    }
+}
+
+# sys_read_battery
+# Print "STATE PERCENTAGE TIME_TO_EMPTY TIME_TO_FULL" from UPower.
+sys_read_battery() {
+    local answer battery
+    answer="$(busctl --system get-property org.freedesktop.UPower "$UPOWER_DEVICE" \
+        org.freedesktop.UPower.Device "${UPOWER_PROPERTIES[@]}")" || {
+        err "could not read the battery from UPower"
+        return "$EXIT_SYSTEM"
+    }
+    battery="$(parse_battery "$answer")" || {
+        if (($? == 2)); then
+            err "no battery found"
+        else
+            err "unexpected answer from UPower"
+        fi
+        return "$EXIT_SYSTEM"
+    }
+    printf '%s\n' "$battery"
+}
+
+# sys_notify URGENCY EXPIRE_MS TITLE BODY
+sys_notify() {
+    notify-send --app-name=battery-notify --urgency="$1" --expire-time="$2" "$3" "$4" || {
+        err "could not send a notification"
+        return "$EXIT_SYSTEM"
+    }
+}
+
 # --- core --------------------------------------------------------------------
-# Placeholders until the system layer exists (step 3 of the rewrite).
+
+# notify_rule RULE STATE PERCENTAGE TIME_TO_EMPTY TIME_TO_FULL
+# Send RULE's notification for this battery reading.
+notify_rule() {
+    local -r rule="$1" state="$2" percent="$3" to_empty="$4" to_full="$5"
+    local time notification urgency expire title body
+    time="$(format_time "$(time_for "$state" "$to_empty" "$to_full")")"
+    notification="$(render_rule "$rule" "$percent" "$time")"
+    IFS="$SEP" read -r urgency expire title body <<<"$notification"
+    sys_notify "$urgency" "$expire" "$title" "$body"
+}
 
 core_show() {
-    err "'show' is not implemented yet"
-    return "$EXIT_SYSTEM"
+    local rules battery state percent to_empty to_full rule
+    rules="$(sys_load_rules)" || return
+    battery="$(sys_read_battery)" || return
+    read -r state percent to_empty to_full <<<"$battery"
+    rule="$(sys_rule_for "$(show_event "$state")" "$rules")" || return
+    notify_rule "$rule" "$state" "$percent" "$to_empty" "$to_full"
 }
 
 core_status() {
-    err "'status' is not implemented yet"
-    return "$EXIT_SYSTEM"
+    local battery state percent to_empty to_full
+    sys_load_rules >/dev/null || return
+    battery="$(sys_read_battery)" || return
+    read -r state percent to_empty to_full <<<"$battery"
+    format_status "$state" "$percent" "$to_empty" "$to_full"
 }
 
 core_daemon() {

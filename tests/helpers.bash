@@ -22,6 +22,10 @@ FAKED_COMMANDS=(busctl gdbus notify-send)
 common_setup() {
     # Times in notifications are formatted in UTC, so expectations are fixed.
     export TZ=UTC
+    # Never read the user's real configuration.
+    export HOME="$BATS_TEST_TMPDIR/home"
+    mkdir -p "$HOME"
+    unset XDG_CONFIG_HOME
     export FAKE_DIR="$BATS_TEST_TMPDIR/fake"
     mkdir -p "$FAKE_DIR/bin" "$FAKE_DIR/rules"
     : >"$FAKE_DIR/calls.log"
