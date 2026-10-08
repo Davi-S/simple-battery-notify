@@ -147,13 +147,13 @@ assert_notified() { # URGENCY EXPIRE_MS TITLE BODY
     assert_status 0
     assert_output ""
     assert_stderr ""
-    assert_notified normal 2000 "Battery 58%" "3:36 remaining"
+    assert_notified normal 2000 "Battery 58%" "3h 36m remaining"
 }
 
 @test "show: charging, and full" {
     fake_battery 1 58 0 4200
     run "$BATTERY_NOTIFY" show
-    assert_notified normal 2000 "Battery 58%" "1:10 to full"
+    assert_notified normal 2000 "Battery 58%" "1h 10m to full"
     fake_battery 4 100 0 0
     run "$BATTERY_NOTIFY" show
     assert_notified normal 2000 "Battery Full" "Battery 100%"
@@ -162,7 +162,7 @@ assert_notified() { # URGENCY EXPIRE_MS TITLE BODY
 @test "show: a time UPower does not know yet" {
     fake_battery 2 58 0 0
     run "$BATTERY_NOTIFY" show
-    assert_notified normal 2000 "Battery 58%" "unknown remaining"
+    assert_notified normal 2000 "Battery 58%" "estimating... remaining"
 }
 
 @test "show: the user's config replaces the defaults" {
@@ -170,7 +170,7 @@ assert_notified() { # URGENCY EXPIRE_MS TITLE BODY
     fake_battery 2 58 12960 0
     run "$BATTERY_NOTIFY" show
     assert_status 0
-    assert_notified low 500 "58!" "3:36"
+    assert_notified low 500 "58!" "3h 36m"
 }
 
 @test "show: XDG_CONFIG_HOME is used when set and absolute" {
@@ -267,9 +267,9 @@ monitor_lines() {
     assert_equal "$(calls busctl | wc -l)" 4 # every reading was seen
     # Only the charging levels, as normal time-to-full notifications; no
     # low-battery warning (those are critical and say "Connect the charger").
-    assert_notified normal 2000 "Battery 12%" "1:23 to full"
-    assert_notified normal 2000 "Battery 16%" "1:06 to full"
-    assert_notified normal 2000 "Battery 21%" "0:50 to full"
+    assert_notified normal 2000 "Battery 12%" "1h 23m to full"
+    assert_notified normal 2000 "Battery 16%" "1h 06m to full"
+    assert_notified normal 2000 "Battery 21%" "0h 50m to full"
     assert_equal "$(calls notify-send | wc -l)" 3
     [[ "$(calls notify-send)" != *critical* && "$(calls notify-send)" != *"Connect the charger"* ]] ||
         fail "a low-battery warning while charging: $(calls notify-send)"
@@ -280,8 +280,8 @@ monitor_lines() {
     readings "2 31 9000 0" "1 31 0 5000" "2 31 9000 0"
     monitor_lines 2
     run "$BATTERY_NOTIFY" daemon
-    assert_notified normal 2000 "Charger connected" "Battery 31% · 1:23 to full"
-    assert_notified normal 2000 "Charger disconnected" "Battery 31% · 2:30 remaining"
+    assert_notified normal 2000 "Charger connected" "Battery 31% · 1h 23m to full"
+    assert_notified normal 2000 "Charger disconnected" "Battery 31% · 2h 30m remaining"
     assert_equal "$(calls notify-send | wc -l)" 2
 }
 

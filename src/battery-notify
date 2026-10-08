@@ -60,7 +60,7 @@ readonly DEFAULT_CONFIG='# battery-notify configuration.
 #                     "battery-notify show", by state
 # Keys: title (required), message, urgency (low, normal, critical; default
 # normal), timeout (milliseconds; default 2000, 0 for critical: stays until
-# dismissed). Placeholders: {level} (percentage), {time} (h:mm left).
+# dismissed). Placeholders: {level} (percentage), {time} (time left, as 3h 36m).
 
 [show discharging]
 title = Battery {level}%
@@ -402,13 +402,14 @@ time_for() {
     esac
 }
 
-# format_time SECONDS: "h:mm", or "unknown" for 0 (UPower still estimating).
+# format_time SECONDS: "3h 36m", or "estimating..." for 0 (UPower has no
+# estimate yet).
 format_time() {
     local -r seconds="$1"
     if ((seconds == 0)); then
-        printf 'unknown\n'
+        printf 'estimating...\n'
     else
-        printf '%d:%02d\n' $((seconds / 3600)) $((seconds % 3600 / 60))
+        printf '%dh %02dm\n' $((seconds / 3600)) $((seconds % 3600 / 60))
     fi
 }
 

@@ -155,12 +155,12 @@ assert_config_error() {
     assert_equal "$(power_source unknown)" unknown
 }
 
-@test "format_time: hours and minutes, or unknown" {
-    assert_equal "$(format_time 12960)" "3:36"
-    assert_equal "$(format_time 3600)" "1:00"
-    assert_equal "$(format_time 59)" "0:00"
-    assert_equal "$(format_time 360000)" "100:00"
-    assert_equal "$(format_time 0)" "unknown"
+@test "format_time: hours and minutes, or estimating" {
+    assert_equal "$(format_time 12960)" "3h 36m"
+    assert_equal "$(format_time 3600)" "1h 00m"
+    assert_equal "$(format_time 59)" "0h 00m"
+    assert_equal "$(format_time 360000)" "100h 00m"
+    assert_equal "$(format_time 0)" "estimating..."
 }
 
 @test "time_for: time to empty on battery, to full while charging, else none" {

@@ -6,6 +6,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `{time}` shows its units: `3h 36m` instead of `3:36`, and `estimating...`
+  instead of `unknown` while UPower has no estimate yet (#2).
+
 ## [2.1.0] - 2026-09-29
 
 ### Changed
