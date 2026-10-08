@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-08
+
 ### Changed
 
 - `{time}` shows its units: `3h 36m` instead of `3:36`, and `estimating...`

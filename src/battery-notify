@@ -26,7 +26,7 @@
 #     in a variable named by its first argument (`local -n`), because `$(...)`
 #     forks a process. Marked "Returns in OUT" where used.
 
-VERSION="2.1.0"
+VERSION="2.2.0"
 readonly VERSION
 
 # Exit codes. Each has one meaning across all commands.
