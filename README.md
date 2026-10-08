@@ -120,7 +120,8 @@ message = {level}% · {time} to full
 
 Keys: `title` (required), `message`, `urgency` (`low`, `normal`, `critical`)
 and `timeout` (milliseconds; 2000 by default, 0 for critical: until dismissed).
-Placeholders: `{level}` (percentage) and `{time}` (h:mm left, or `unknown`).
+Placeholders: `{level}` (percentage) and `{time}` (time left, as `3h 36m`, or
+`estimating...`).
 
 A mistake stops every command with its file and line; the daemon also shows it
 as a critical notification. See `man battery-notify` for the full reference.

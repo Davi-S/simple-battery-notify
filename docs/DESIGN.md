@@ -105,9 +105,9 @@ stdout is data only; messages and errors go to stderr.
 
 - An event with no section is silent. `show` with no matching section fails with
   a config error.
-- Placeholders in messages: `{level}` (percentage) and `{time}` (`3:36`, or
-  `unknown` while UPower is still estimating). An unknown placeholder is a
-  config error.
+- Placeholders in messages: `{level}` (percentage) and `{time}` (`3h 36m`, or
+  `estimating...` while UPower has no estimate yet). An unknown placeholder is
+  a config error.
 
 ## Default notifications
 

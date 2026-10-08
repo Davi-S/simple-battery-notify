@@ -14,7 +14,7 @@
 #                     "battery-notify show", by state
 # Keys: title (required), message, urgency (low, normal, critical; default
 # normal), timeout (milliseconds; default 2000, 0 for critical: stays until
-# dismissed). Placeholders: {level} (percentage), {time} (h:mm left).
+# dismissed). Placeholders: {level} (percentage), {time} (time left, as 3h 36m).
 
 [show discharging]
 title = Battery {level}%
